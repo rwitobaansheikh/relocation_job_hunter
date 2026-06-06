@@ -85,6 +85,8 @@ class JobApplication(Base):
     status = Column(String(50), default=ApplicationStatus.DISCOVERED.value)
     tailored_cv_path = Column(String(500), default="")
     tailored_cover_letter_path = Column(String(500), default="")
+    ai_match_score = Column(Integer, default=0)
+    analysis_json = Column(Text, default="")
     notes = Column(Text, default="")
     applied_at = Column(DateTime, nullable=True)
     last_follow_up_at = Column(DateTime, nullable=True)
@@ -120,6 +122,32 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    _ensure_columns()
+
+
+def _ensure_columns() -> None:
+    """Lightweight migration: add new columns to existing SQLite databases that
+    were created before these columns existed (create_all won't alter tables)."""
+    required = {
+        "ai_match_score": "INTEGER DEFAULT 0",
+        "analysis_json": "TEXT DEFAULT ''",
+    }
+    try:
+        with engine.connect() as conn:
+            existing = {
+                row[1]
+                for row in conn.exec_driver_sql("PRAGMA table_info(job_applications)")
+            }
+            for column, ddl in required.items():
+                if column not in existing:
+                    conn.exec_driver_sql(
+                        f"ALTER TABLE job_applications ADD COLUMN {column} {ddl}"
+                    )
+            conn.commit()
+    except Exception:
+        # Non-SQLite backends or race conditions: create_all already handles the
+        # fresh-DB case, so failing here is non-fatal.
+        pass
 
 
 def get_db():

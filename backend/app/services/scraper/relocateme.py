@@ -2,6 +2,7 @@
 
 import re
 from datetime import datetime
+from typing import Optional
 
 import httpx
 from bs4 import BeautifulSoup
@@ -13,13 +14,16 @@ class RelocateMeScraper:
     source_name = "relocateme"
     base_url = "https://relocate.me"
 
-    async def fetch_jobs(self, limit: int = 50) -> list[RawJob]:
+    async def fetch_jobs(self, limit: int = 50, roles: Optional[list[str]] = None) -> list[RawJob]:
         jobs: list[RawJob] = []
+        params: dict[str, object] = {"experience": "junior,graduate,intern"}
+        if roles:
+            params["query"] = " ".join(roles[:3])
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             response = await client.get(
                 f"{self.base_url}/search",
                 headers={"User-Agent": "relocation-job-hunter/1.0"},
-                params={"experience": "junior,graduate,intern"},
+                params=params,
             )
             if response.status_code != 200:
                 return jobs

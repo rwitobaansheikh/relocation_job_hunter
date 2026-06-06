@@ -1,6 +1,7 @@
 """RemoteOK public API scraper — relocation-friendly remote jobs."""
 
 from datetime import datetime, timezone
+from typing import Optional
 
 import httpx
 
@@ -11,7 +12,7 @@ class RemoteOKScraper:
     source_name = "remoteok"
     api_url = "https://remoteok.com/api"
 
-    async def fetch_jobs(self, limit: int = 200) -> list[RawJob]:
+    async def fetch_jobs(self, limit: int = 200, roles: Optional[list[str]] = None) -> list[RawJob]:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             response = await client.get(
                 self.api_url,

@@ -4,10 +4,10 @@ Automated job hunting tool that finds relocation-friendly graduate/junior/intern
 
 ## Features
 
-- **Job scraping** from relocation-friendly sources (RemoteOK, Remotive, We Work Remotely, Relocate.me)
-- **Smart filtering** for roles posted in the last 48 hours with relocation/visa support at graduate, junior, or intern level
+- **Job scraping** from LinkedIn (public guest search) plus relocation-friendly sources (RemoteOK, Remotive, We Work Remotely, Relocate.me)
+- **Smart filtering** for roles posted in the last 48 hours at graduate, junior, or intern level (relocation/visa support boosts ranking but is not required)
 - **CV-based relevance scoring** to rank up to 100 best-matching jobs
-- **AI document tailoring** — generates per-job CV and cover letter using OpenAI
+- **AI document tailoring** — generates a per-job one-page CV and cover letter (PDF) using Google Gemini, with an AI match score, score breakdown, and gap analysis
 - **Email outreach** — finds up to 5 contacts per company via Hunter.io and sends tailored applications
 - **Web dashboard** — upload documents, track applications, manage follow-ups
 
@@ -36,8 +36,8 @@ relocation-job-hunter/
 - Python 3.11+
 - Node.js 18+
 - API keys (see `.env.example`):
-  - **OpenAI** — for CV/cover letter tailoring
-  - **Hunter.io** — for finding hiring manager emails (optional; falls back to generic addresses)
+  - **Google Gemini** — for CV/cover letter tailoring
+  - **Hunter.io** — for finding/verifying hiring manager emails (optional; falls back to generic addresses)
   - **SMTP** — for sending outreach emails (Gmail app password works)
 
 ## Setup
@@ -98,7 +98,7 @@ Open http://localhost:5173 in your browser.
 
 - **Scraping ethics**: Uses public APIs and RSS feeds where available. Respect robots.txt and rate limits for any custom scrapers added later.
 - **Email compliance**: Only send outreach to professional contacts. Include an unsubscribe option for production use. CAN-SPAM/GDPR may apply depending on your jurisdiction.
-- **LinkedIn/Indeed**: Not included in v1 due to ToS restrictions. Can be added via official APIs with proper credentials.
+- **LinkedIn**: Scraped via LinkedIn's unauthenticated public guest job-search endpoints (no login required). LinkedIn rate-limits aggressively and this may conflict with their Terms of Service — requests are throttled/bounded, but use responsibly. Indeed is not included due to ToS restrictions.
 - **Dry run mode**: Always test email outreach with dry run before sending live emails.
 
 ## Environment Variables

@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from typing import Optional
 
 import feedparser
 import httpx
@@ -17,7 +18,7 @@ class WeWorkRemotelyScraper:
         "https://weworkremotely.com/categories/remote-customer-support-jobs.rss",
     ]
 
-    async def fetch_jobs(self, limit: int = 100) -> list[RawJob]:
+    async def fetch_jobs(self, limit: int = 100, roles: Optional[list[str]] = None) -> list[RawJob]:
         jobs: list[RawJob] = []
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             for feed_url in self.feed_urls:

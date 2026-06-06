@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import settings
 from app.database import JobApplication, OutreachEmail, UserProfile, get_db
 from app.schemas import (
+    ContactResponse,
     FollowUpRequest,
     JobApplicationResponse,
     JobSearchRequest,
@@ -22,6 +23,7 @@ from app.schemas import (
 )
 from app.services.document_generator import DocumentGenerator
 from app.services.document_parser import extract_text_from_file
+from app.services.email_finder import EmailFinder
 from app.services.email_service import EmailService
 from app.services.job_search import JobSearchService
 
@@ -127,6 +129,26 @@ def list_applications(
     return query.order_by(JobApplication.created_at.desc()).all()
 
 
+@router.delete("/applications")
+def delete_all_applications(profile_id: int, db: Session = Depends(get_db)):
+    """Remove all job applications (and their outreach emails) for a profile."""
+    app_ids = [
+        a.id
+        for a in db.query(JobApplication.id)
+        .filter(JobApplication.user_profile_id == profile_id)
+        .all()
+    ]
+    if app_ids:
+        db.query(OutreachEmail).filter(
+            OutreachEmail.application_id.in_(app_ids)
+        ).delete(synchronize_session=False)
+        db.query(JobApplication).filter(
+            JobApplication.id.in_(app_ids)
+        ).delete(synchronize_session=False)
+        db.commit()
+    return {"deleted": len(app_ids)}
+
+
 @router.get("/applications/{application_id}", response_model=JobApplicationResponse)
 def get_application(application_id: int, db: Session = Depends(get_db)):
     app = (
@@ -172,14 +194,20 @@ async def tailor_single(application_id: int, db: Session = Depends(get_db)):
     try:
         return await generator.tailor_for_application(db, application_id)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(status_code=404, detail=message)
+        # Tailoring failed (e.g. AI rate-limited) - surface as a retryable error.
+        raise HTTPException(status_code=503, detail=message)
 
 
 @router.post("/applications/send-outreach", response_model=list[OutreachEmailResponse])
 async def send_outreach(request: SendOutreachRequest, db: Session = Depends(get_db)):
     service = EmailService()
     try:
-        return await service.send_outreach(db, request.application_id, request.dry_run)
+        return await service.send_outreach(
+            db, request.application_id, request.dry_run, request.test_to_self
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -187,6 +215,33 @@ async def send_outreach(request: SendOutreachRequest, db: Session = Depends(get_
 @router.get("/applications/{application_id}/emails", response_model=list[OutreachEmailResponse])
 def get_outreach_emails(application_id: int, db: Session = Depends(get_db)):
     return db.query(OutreachEmail).filter(OutreachEmail.application_id == application_id).all()
+
+
+@router.get("/applications/{application_id}/contacts", response_model=list[ContactResponse])
+async def find_application_contacts(application_id: int, db: Session = Depends(get_db)):
+    """Look up outreach contacts (emails) for the job's company via Hunter.io."""
+    app = (
+        db.query(JobApplication)
+        .options(joinedload(JobApplication.job))
+        .filter(JobApplication.id == application_id)
+        .first()
+    )
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    if not app.job:
+        raise HTTPException(status_code=400, detail="Application has no associated job")
+
+    finder = EmailFinder()
+    contacts = await finder.find_contacts(
+        company=app.job.company,
+        domain=app.job.company_domain,
+        job_title=app.job.title,
+        limit=settings.max_emails_per_company,
+    )
+    return [
+        ContactResponse(name=c.name, email=c.email, title=c.title, confidence=c.confidence)
+        for c in contacts
+    ]
 
 
 @router.post("/applications/follow-up")

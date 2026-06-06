@@ -74,6 +74,8 @@ class JobApplicationResponse(BaseModel):
     status: str
     tailored_cv_path: str
     tailored_cover_letter_path: str
+    ai_match_score: int = 0
+    analysis_json: str = ""
     notes: str
     applied_at: Optional[datetime]
     last_follow_up_at: Optional[datetime]
@@ -85,6 +87,13 @@ class JobApplicationResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ContactResponse(BaseModel):
+    name: str
+    email: str
+    title: str
+    confidence: int = 0
+
+
 class OutreachEmailResponse(BaseModel):
     id: int
     application_id: int
@@ -92,7 +101,9 @@ class OutreachEmailResponse(BaseModel):
     recipient_email: str
     recipient_title: str
     subject: str
+    body: str
     status: str
+    error_message: str
     sent_at: Optional[datetime]
 
     model_config = {"from_attributes": True}
@@ -110,6 +121,7 @@ class TailorDocumentsRequest(BaseModel):
 class SendOutreachRequest(BaseModel):
     application_id: int
     dry_run: bool = False
+    test_to_self: bool = False
 
 
 class FollowUpRequest(BaseModel):
@@ -121,6 +133,8 @@ class FollowUpRequest(BaseModel):
 class SearchStatsResponse(BaseModel):
     jobs_found: int
     jobs_stored: int
-    jobs_filtered_relocation: int
-    jobs_filtered_experience: int
+    jobs_filtered_excluded: int
     jobs_filtered_age: int
+    jobs_filtered_experience: int
+    jobs_filtered_role: int
+    jobs_filtered_country: int

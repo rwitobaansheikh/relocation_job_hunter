@@ -9,7 +9,9 @@ httpx>=0.28.0
 beautifulsoup4>=4.12.3
 lxml>=5.3.0
 feedparser>=6.0.11
-openai>=1.57.0
+markdown>=3.7
+# Pinned <0.2.12: newer releases pull in pycairo (requires system cairo libs).
+xhtml2pdf==0.2.11
 python-docx>=1.1.2
 pypdf>=5.1.0
 aiosmtplib>=3.0.2

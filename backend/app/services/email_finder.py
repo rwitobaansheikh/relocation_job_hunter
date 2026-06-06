@@ -30,24 +30,63 @@ class EmailFinder:
         if not domain:
             return []
 
-        contacts: list[Contact] = []
         async with httpx.AsyncClient(timeout=30.0) as client:
-            domain_contacts = await self._domain_search(client, domain, limit)
-            contacts.extend(domain_contacts)
-
-            if len(contacts) < limit:
-                dept_contacts = await self._department_search(client, domain, job_title, limit - len(contacts))
-                contacts.extend(dept_contacts)
+            # Priority order: HR first, then IT, then any department so we still
+            # surface contacts for roles where neither HR nor IT is published.
+            contacts = await self._department_search(client, domain, "hr", limit)
+            if not contacts:
+                logger.info("No HR contacts for %s, trying IT department", domain)
+                contacts = await self._department_search(client, domain, "it", limit)
+            if not contacts:
+                logger.info("No HR/IT contacts for %s, trying unfiltered domain search", domain)
+                contacts = await self._domain_search(client, domain, limit)
 
         seen = set()
         unique: list[Contact] = []
         for c in contacts:
-            if c.email not in seen:
+            if c.email and c.email not in seen:
                 seen.add(c.email)
                 unique.append(c)
-        return unique[:limit]
 
-    async def _domain_search(self, client: httpx.AsyncClient, domain: str, limit: int) -> list[Contact]:
+        verified = await self._filter_verified(unique)
+        # Last resort: if Hunter has the domain but everything got filtered out
+        # (or returned nothing), fall back to generic role addresses so the user
+        # always has someone to contact.
+        if not verified:
+            logger.info("No verified contacts for %s, using generic role addresses", domain)
+            return self._fallback_contacts(company, domain, limit)
+        return verified[:limit]
+
+    async def _filter_verified(self, contacts: list[Contact]) -> list[Contact]:
+        """Drop addresses Hunter flags as undeliverable. Keeps unknown/risky ones."""
+        if not contacts:
+            return contacts
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            kept: list[Contact] = []
+            for c in contacts:
+                status = await self._verify_email(client, c.email)
+                if status == "undeliverable":
+                    logger.info("Skipping undeliverable address %s", c.email)
+                    continue
+                kept.append(c)
+        return kept
+
+    async def _verify_email(self, client: httpx.AsyncClient, email: str) -> str:
+        try:
+            response = await client.get(
+                f"{self.hunter_base}/email-verifier",
+                params={"email": email, "api_key": settings.hunter_api_key},
+            )
+            response.raise_for_status()
+            return response.json().get("data", {}).get("status", "unknown")
+        except Exception as exc:
+            logger.warning("Email verification failed for %s: %s", email, exc)
+            return "unknown"
+
+    async def _domain_search(
+        self, client: httpx.AsyncClient, domain: str, limit: int
+    ) -> list[Contact]:
+        """Unfiltered domain search, prioritizing hiring-related titles."""
         try:
             response = await client.get(
                 f"{self.hunter_base}/domain-search",
@@ -58,12 +97,11 @@ class EmailFinder:
                 },
             )
             response.raise_for_status()
-            data = response.json().get("data", {})
-            emails = data.get("emails", [])
+            emails = response.json().get("data", {}).get("emails", [])
 
             hiring_keywords = ["hr", "recruit", "talent", "hiring", "people", "human resources"]
-            prioritized = []
-            others = []
+            prioritized: list[Contact] = []
+            others: list[Contact] = []
             for e in emails:
                 contact = Contact(
                     name=f"{e.get('first_name', '')} {e.get('last_name', '')}".strip(),
@@ -82,9 +120,8 @@ class EmailFinder:
             return []
 
     async def _department_search(
-        self, client: httpx.AsyncClient, domain: str, job_title: str, limit: int
+        self, client: httpx.AsyncClient, domain: str, department: str, limit: int
     ) -> list[Contact]:
-        department = self._infer_department(job_title)
         try:
             response = await client.get(
                 f"{self.hunter_base}/domain-search",
@@ -118,17 +155,6 @@ class EmailFinder:
             clean = company.lower().replace(" ", "").replace(",", "").replace(".", "")
             return f"{clean}.com"
         return ""
-
-    @staticmethod
-    def _infer_department(job_title: str) -> str:
-        title_lower = job_title.lower()
-        if any(kw in title_lower for kw in ["engineer", "developer", "devops", "software"]):
-            return "engineering"
-        if any(kw in title_lower for kw in ["design", "ux", "ui"]):
-            return "design"
-        if any(kw in title_lower for kw in ["market", "sales", "business"]):
-            return "sales"
-        return "executive"
 
     @staticmethod
     def _fallback_contacts(company: str, domain: str, limit: int) -> list[Contact]:

@@ -44,16 +44,19 @@ export const api = {
     return request(`/applications?${params}`)
   },
 
+  deleteAllApplications: (profileId) =>
+    request(`/applications?profile_id=${profileId}`, { method: 'DELETE' }),
+
   tailorDocuments: (applicationIds) =>
     request('/applications/tailor', { method: 'POST', body: JSON.stringify({ application_ids: applicationIds }) }),
 
   tailorSingle: (applicationId) =>
     request(`/applications/${applicationId}/tailor`, { method: 'POST' }),
 
-  sendOutreach: (applicationId, dryRun = false) =>
+  sendOutreach: (applicationId, dryRun = false, testToSelf = false) =>
     request('/applications/send-outreach', {
       method: 'POST',
-      body: JSON.stringify({ application_id: applicationId, dry_run: dryRun }),
+      body: JSON.stringify({ application_id: applicationId, dry_run: dryRun, test_to_self: testToSelf }),
     }),
 
   scheduleFollowUp: (applicationId, notes, scheduleNextDays = 7) =>
@@ -68,4 +71,6 @@ export const api = {
   getDashboardStats: (profileId) => request(`/dashboard/stats?profile_id=${profileId}`),
 
   getOutreachEmails: (applicationId) => request(`/applications/${applicationId}/emails`),
+
+  getContacts: (applicationId) => request(`/applications/${applicationId}/contacts`),
 }

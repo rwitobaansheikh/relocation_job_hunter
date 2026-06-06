@@ -128,6 +128,11 @@ label {
 .badge-interview { background: #065f46; color: #34d399; }
 .badge-rejected { background: #7f1d1d; color: #fca5a5; }
 .badge-replied { background: #1e3a5f; color: #7dd3fc; }
+.badge-sent { background: #064e3b; color: #6ee7b7; }
+.badge-test_sent { background: #065f46; color: #6ee7b7; }
+.badge-dry_run { background: #3b2f05; color: #fde68a; }
+.badge-pending { background: #334155; color: #cbd5e1; }
+.badge-failed { background: #7f1d1d; color: #fca5a5; }
 
 .layout {
   display: flex;
@@ -224,7 +229,34 @@ label {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  flex-wrap: wrap;
   gap: 1rem;
+}
+
+.email-records {
+  flex-basis: 100%;
+  width: 100%;
+  border-top: 1px solid var(--border);
+  padding-top: 0.8rem;
+  margin-top: 0.2rem;
+}
+
+.email-record {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.8rem;
+  margin-bottom: 0.6rem;
+}
+
+.email-record .email-body {
+  white-space: pre-wrap;
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+  max-height: 260px;
+  overflow-y: auto;
 }
 
 .job-item:hover {
