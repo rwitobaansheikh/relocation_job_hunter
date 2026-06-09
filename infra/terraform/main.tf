@@ -269,12 +269,17 @@ resource "aws_iam_role_policy" "github_actions_deploy_ssh" {
     Version = "2012-10-17"
     Statement = [
       {
+        Sid      = "DescribeSecurityGroups"
+        Effect   = "Allow"
+        Action   = ["ec2:DescribeSecurityGroups"]
+        Resource = "*"
+      },
+      {
         Sid    = "EphemeralSshIngress"
         Effect = "Allow"
         Action = [
           "ec2:AuthorizeSecurityGroupIngress",
           "ec2:RevokeSecurityGroupIngress",
-          "ec2:DescribeSecurityGroups",
         ]
         Resource = aws_security_group.app.arn
       },

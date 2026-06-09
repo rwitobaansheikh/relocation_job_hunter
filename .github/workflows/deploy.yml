@@ -68,9 +68,11 @@ jobs:
         run: |
           set -euo pipefail
           RUNNER_IP=$(curl -fsS https://checkip.amazonaws.com | tr -d '[:space:]')
-          SG_ID=$(aws ec2 describe-security-groups \
-            --filters "Name=group-name,Values=relocation-job-hunter-sg" \
-            --query 'SecurityGroups[0].GroupId' --output text)
+          SG_ID="${{ secrets.EC2_SECURITY_GROUP_ID }}"
+          if [[ -z "$SG_ID" ]]; then
+            echo "Missing GitHub secret EC2_SECURITY_GROUP_ID (terraform output security_group_id)."
+            exit 1
+          fi
           echo "Runner IP: $RUNNER_IP"
           echo "Security group: $SG_ID"
           aws ec2 authorize-security-group-ingress \

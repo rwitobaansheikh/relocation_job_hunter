@@ -179,6 +179,7 @@ Note the outputs — you'll need them for the GitHub secrets below:
 | `AWS_DEPLOY_ROLE_ARN` | Terraform output `github_actions_role_arn` |
 | `ECR_REPOSITORY` | The repo **name** (e.g. `relocation-job-hunter`) |
 | `EC2_HOST` | Terraform output `instance_public_ip` |
+| `EC2_SECURITY_GROUP_ID` | Terraform output `security_group_id` (ephemeral CI SSH) |
 | `EC2_USER` | `ec2-user` |
 | `EC2_SSH_KEY` | The **private** key matching `ssh_public_key` |
 | `APP_ENV` | Full contents of a filled-in `.env.production.example` (Gemini/Hunter/SMTP keys, plus the now-required `JWT_SECRET` and `ENCRYPTION_KEY`) |
