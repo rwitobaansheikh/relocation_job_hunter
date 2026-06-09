@@ -216,9 +216,12 @@ supported paths — the Tunnel option is recommended (no inbound ports, free TLS
 2. In **Cloudflare Zero Trust → Networks → Tunnels**, create a tunnel and copy
    its **token** into `CLOUDFLARE_TUNNEL_TOKEN` in the `APP_ENV` secret.
 3. Add **Public Hostnames** to the tunnel:
-   - `jobapplicationflow.com` → Service `http://app:8000`
-   - `www.jobapplicationflow.com` → Service `http://app:8000`
+   - `jobapplicationflow.com` → Service `http://127.0.0.1:80`
+   - `www.jobapplicationflow.com` → Service `http://127.0.0.1:80`
    Cloudflare auto-creates the proxied DNS records and serves HTTPS.
+4. In **Cloudflare DNS**, delete any **A** records for `@` / `www` pointing at the
+   EC2 Elastic IP. Those cause **Error 522** (Cloudflare hits :443 on the instance).
+   Tunnel hostnames should be **CNAME → `….cfargotunnel.com`** (proxied).
 4. Deploy with the sidecar:
    `docker compose -f docker-compose.yml -f docker-compose.cloudflared.yml up -d`.
    You can then tighten the security group to drop inbound 80/443 entirely.

@@ -16,6 +16,8 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
+    # Host network so tunnel routes can use http://127.0.0.1:80 (app publishes 80:8000).
+    network_mode: host
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
       - app
