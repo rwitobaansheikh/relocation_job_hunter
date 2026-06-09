@@ -9,9 +9,8 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---- Stage 2: Python backend that also serves the built frontend ----
-# Python 3.11 has prebuilt wheels for reportlab 3.6.x (pinned via xhtml2pdf
-# <4). The native libs below let reportlab's _renderPM compile from source as
-# a fallback (needs FreeType/JPEG/zlib headers) if a wheel isn't available.
+# WeasyPrint renders the generated PDFs and needs the Pango/Cairo/GDK-PixBuf
+# native stack (plus a font) at runtime - these are not Python wheels.
 FROM python:3.11-slim AS backend
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -24,10 +23,12 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential \
-        libfreetype6-dev \
-        libjpeg-dev \
-        zlib1g-dev \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf-2.0-0 \
+        libcairo2 \
+        libffi-dev \
+        fonts-dejavu \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./

@@ -18,3 +18,23 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # Local LLM for CV tailoring, emails, and suggestions. On AWS, run this on a
+  # GPU-backed EC2 instance or scale to a dedicated GPU service; set
+  # OLLAMA_BASE_URL=http://ollama:11434 in .env (default below).
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    # Uncomment on a GPU host (NVIDIA):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+volumes:
+  ollama_data:

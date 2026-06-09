@@ -1,4 +1,5 @@
-:root {
+:root,
+[data-theme="dark"] {
   --bg: #0f1117;
   --surface: #1a1d27;
   --surface-hover: #22263a;
@@ -11,6 +12,20 @@
   --warning: #fbbf24;
   --danger: #f87171;
   --radius: 10px;
+}
+
+[data-theme="light"] {
+  --bg: #f4f5f8;
+  --surface: #ffffff;
+  --surface-hover: #eef0f5;
+  --border: #d5dae6;
+  --text: #1a1d27;
+  --text-muted: #5c6378;
+  --accent: #4a6cf7;
+  --accent-hover: #3b5de0;
+  --success: #059669;
+  --warning: #d97706;
+  --danger: #dc2626;
 }
 
 * {
@@ -330,4 +345,232 @@ label {
   text-align: center;
   padding: 3rem;
   color: var(--text-muted);
+}
+
+/* --- Auth pages --- */
+.auth-wrap {
+  display: flex;
+  min-height: 100vh;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  position: relative;
+}
+.theme-toggle-auth {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  font-size: 0.85rem !important;
+  padding: 0.45rem 0.75rem !important;
+}
+.auth-card { width: 100%; max-width: 420px; }
+.auth-card h2 { margin-bottom: 0.3rem; font-size: 1.5rem; }
+.auth-switch { margin-top: 1.2rem; font-size: 0.9rem; color: var(--text-muted); text-align: center; }
+
+/* --- Landing page --- */
+.landing { max-width: 1040px; margin: 0 auto; padding: 1rem 2rem 4rem; }
+.landing-nav { display: flex; justify-content: space-between; align-items: center; padding: 1.4rem 0; }
+.landing-nav .brand { font-size: 1.2rem; font-weight: 700; color: var(--accent); }
+.landing-nav .links { display: flex; gap: 0.6rem; }
+.landing-hero { text-align: center; padding: 3rem 0 2.5rem; }
+.landing-hero h1 { font-size: 2.8rem; font-weight: 800; margin-bottom: 1.1rem; line-height: 1.15; }
+.landing-hero p { font-size: 1.15rem; color: var(--text-muted); max-width: 660px; margin: 0 auto 1.8rem; }
+.landing-cta { display: flex; gap: 0.8rem; justify-content: center; flex-wrap: wrap; }
+.landing-cta button { padding: 0.75rem 1.6rem; font-size: 1rem; }
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.2rem;
+  margin-top: 1.5rem;
+}
+.feature-grid .card h3 { margin-bottom: 0.45rem; font-size: 1.05rem; }
+.feature-grid .card p { font-size: 0.9rem; color: var(--text-muted); }
+.section-heading { text-align: center; font-size: 1.6rem; font-weight: 700; margin: 3rem 0 0.5rem; }
+.section-sub { text-align: center; color: var(--text-muted); margin-bottom: 1rem; }
+
+/* --- Tables (admin) --- */
+.table { width: 100%; border-collapse: collapse; }
+.table th, .table td {
+  text-align: left;
+  padding: 0.6rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+.table th { color: var(--text-muted); font-weight: 600; }
+.table select { width: auto; font-size: 0.8rem; padding: 0.3rem 0.5rem; }
+
+.switch-row { display: flex; align-items: center; gap: 0.6rem; margin: 0.4rem 0; }
+.muted { color: var(--text-muted); font-size: 0.85rem; }
+
+/* Job search filters */
+.checkbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.4rem 0;
+}
+.checkbox-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+}
+.checkbox-pill input { width: auto; margin: 0; cursor: pointer; }
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 1rem;
+}
+
+/* Search criteria suggestions */
+.criteria-panel { margin-top: 0.75rem; }
+.criteria-summary {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  margin-bottom: 0.9rem;
+  line-height: 1.5;
+}
+.criteria-block { margin-bottom: 0.75rem; }
+.criteria-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.criteria-meta { font-size: 0.85rem; margin-top: 0.5rem; }
+
+/* Role suggestions (profile) */
+.role-suggest-box {
+  margin: 0.5rem 0 1rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+/* Danger zone (account deletion) */
+.danger-zone {
+  border: 1px solid #e5484d;
+  background: rgba(229, 72, 77, 0.04);
+}
+.danger-zone h3 { color: #e5484d; }
+
+/* Reviews + contact (landing + in-app) */
+.nav-anchor {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+  align-self: center;
+  padding: 0 0.4rem;
+}
+.nav-anchor:hover { color: var(--text); }
+.fb-section { margin-top: 3.5rem; }
+.review-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.review-card { display: flex; flex-direction: column; gap: 0.5rem; }
+.review-msg { font-style: italic; margin: 0; }
+.review-author { font-size: 0.85rem; color: var(--text-muted); font-weight: 600; }
+.fb-form-card { max-width: 640px; margin: 0 auto; }
+.stars { display: inline-flex; gap: 0.15rem; }
+.star {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.4rem;
+  line-height: 1;
+  color: var(--border);
+  padding: 0;
+}
+.star.on { color: #f5b301; }
+.star:disabled { cursor: default; }
+
+/* Pricing / billing */
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+.pricing-card { display: flex; flex-direction: column; }
+.pricing-current { border-color: var(--accent); }
+.pricing-price { font-size: 1.8rem; font-weight: 700; margin: 0.3rem 0; }
+.pricing-features {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0;
+  flex: 1;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+.pricing-features li { padding: 0.3rem 0; border-bottom: 1px solid var(--border); }
+
+/* Sidebar plan badge */
+.plan-badge {
+  display: flex !important;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.6rem !important;
+  font-size: 0.82rem;
+  margin-bottom: 0.4rem;
+}
+.plan-badge small { color: var(--accent); }
+
+/* Full job description panel */
+.job-description {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text);
+  max-height: 480px;
+  overflow-y: auto;
+  padding: 0.75rem 0.9rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.job-description-html p {
+  margin: 0 0 0.65rem;
+}
+
+.job-description-html ul,
+.job-description-html ol {
+  margin: 0.4rem 0 0.8rem 1.25rem;
+  padding: 0;
+}
+
+.job-description-html li {
+  margin-bottom: 0.35rem;
+}
+
+.job-description-html strong,
+.job-description-html b {
+  font-weight: 600;
+}
+
+.job-description-html a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.job-description-html br + br {
+  display: none;
+}
+
+.theme-toggle-nav {
+  padding: 0.45rem 0.75rem !important;
+  font-size: 0.85rem !important;
 }

@@ -4,6 +4,263 @@ from typing import Optional
 from pydantic import BaseModel, EmailStr, Field
 
 
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8)
+    full_name: str
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class DeleteAccountRequest(BaseModel):
+    # Password re-confirmation guards against accidental/hijacked deletion.
+    password: str
+    confirm: str = ""  # client sends "DELETE" to acknowledge permanence
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    role: str
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
+class SettingsResponse(BaseModel):
+    smtp_host: str
+    smtp_port: int
+    smtp_user: str
+    smtp_from: str
+    smtp_password_set: bool
+    gemini_override_set: bool
+    hunter_override_set: bool
+    automation_enabled: bool
+    automation_interval_hours: int
+    daily_send_cap: int
+    per_domain_cap: int
+    max_tailor_per_run: int
+    last_automation_run_at: Optional[datetime] = None
+
+
+class SettingsUpdate(BaseModel):
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_user: Optional[str] = None
+    smtp_from: Optional[str] = None
+    smtp_password: Optional[str] = None  # plaintext; stored encrypted
+    gemini_api_key: Optional[str] = None  # plaintext override; stored encrypted
+    hunter_api_key: Optional[str] = None  # plaintext override; stored encrypted
+    automation_enabled: Optional[bool] = None
+    automation_interval_hours: Optional[int] = Field(default=None, ge=1, le=168)
+    daily_send_cap: Optional[int] = Field(default=None, ge=0, le=200)
+    per_domain_cap: Optional[int] = Field(default=None, ge=1, le=50)
+    max_tailor_per_run: Optional[int] = Field(default=None, ge=1, le=50)
+
+
+class AdminUserResponse(BaseModel):
+    id: int
+    email: str
+    role: str
+    is_active: bool
+    created_at: datetime
+    profile_name: str = ""
+    application_count: int = 0
+    emails_sent: int = 0
+    automation_enabled: bool = False
+    plan: str = ""
+    plan_status: str = ""
+    trial_end: Optional[datetime] = None
+    unlimited_access: bool = False
+
+
+class AdminUserUpdate(BaseModel):
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+    unlimited_access: Optional[bool] = None
+
+
+class AdminStatsResponse(BaseModel):
+    total_users: int
+    active_users: int
+    total_applications: int
+    emails_sent_today: int
+    automation_globally_enabled: bool
+    gemini_calls_today: int
+    hunter_calls_today: int
+    automation_users: int
+
+
+class KillSwitchRequest(BaseModel):
+    enabled: bool
+
+
+# --------------------------------------------------------------------------- #
+# Billing
+# --------------------------------------------------------------------------- #
+class BillingTier(BaseModel):
+    id: str
+    name: str
+    price_usd: int
+    price_display: str
+    currency: str
+    is_estimate: bool
+    features: list[str]
+
+
+class BillingLimits(BaseModel):
+    max_loops: int
+    auto_per_loop_per_day: int
+    manual_per_day: int
+
+
+class BillingUsage(BaseModel):
+    manual_today: int
+    loops_active: int
+
+
+class BillingResponse(BaseModel):
+    plan: str
+    plan_status: str
+    trial_end: Optional[datetime] = None
+    trial_days_left: int = 0
+    current_period_end: Optional[datetime] = None
+    unlimited_access: bool = False
+    is_admin: bool = False
+    stripe_configured: bool = False
+    limits: BillingLimits
+    usage: BillingUsage
+    tiers: list[BillingTier]
+
+
+class CheckoutRequest(BaseModel):
+    tier: str
+
+
+# --------------------------------------------------------------------------- #
+# Feedback / reviews / contact
+# --------------------------------------------------------------------------- #
+class ReviewCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    rating: int = Field(ge=1, le=5)
+    message: str = Field(min_length=3, max_length=2000)
+    email: Optional[EmailStr] = None
+
+
+class ContactCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    email: EmailStr
+    subject: str = Field(default="", max_length=200)
+    message: str = Field(min_length=3, max_length=4000)
+
+
+class ReviewPublic(BaseModel):
+    id: int
+    name: str
+    rating: Optional[int] = None
+    message: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class FeedbackResponse(BaseModel):
+    id: int
+    kind: str
+    name: str
+    email: str
+    rating: Optional[int] = None
+    subject: str
+    message: str
+    approved: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class FeedbackUpdate(BaseModel):
+    approved: Optional[bool] = None
+
+
+class CheckoutResponse(BaseModel):
+    url: str
+
+
+# --------------------------------------------------------------------------- #
+# Automation loops
+# --------------------------------------------------------------------------- #
+class AutomationLoopResponse(BaseModel):
+    id: int
+    name: str
+    role: str
+    locations: str
+    seniority_levels: str
+    posted_within_hours: int
+    min_salary: Optional[int] = None
+    max_salary: Optional[int] = None
+    interval_hours: int
+    daily_send_cap: int
+    per_domain_cap: int
+    max_tailor_per_run: int
+    enabled: bool
+    last_run_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class AutomationLoopCreate(BaseModel):
+    name: str = ""
+    role: str = Field(default="", max_length=200)
+    locations: str = ""
+    seniority_levels: str = ""
+    posted_within_hours: int = Field(default=48, ge=1, le=2160)
+    min_salary: Optional[int] = Field(default=None, ge=0)
+    max_salary: Optional[int] = Field(default=None, ge=0)
+    interval_hours: int = Field(default=12, ge=1, le=168)
+    daily_send_cap: int = Field(default=5, ge=0, le=500)
+    per_domain_cap: int = Field(default=2, ge=1, le=50)
+    max_tailor_per_run: int = Field(default=5, ge=1, le=50)
+    enabled: bool = True
+
+
+class AutomationLoopUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = Field(default=None, max_length=200)
+    locations: Optional[str] = None
+    seniority_levels: Optional[str] = None
+    posted_within_hours: Optional[int] = Field(default=None, ge=1, le=2160)
+    min_salary: Optional[int] = Field(default=None, ge=0)
+    max_salary: Optional[int] = Field(default=None, ge=0)
+    interval_hours: Optional[int] = Field(default=None, ge=1, le=168)
+    daily_send_cap: Optional[int] = Field(default=None, ge=0, le=500)
+    per_domain_cap: Optional[int] = Field(default=None, ge=1, le=50)
+    max_tailor_per_run: Optional[int] = Field(default=None, ge=1, le=50)
+    enabled: Optional[bool] = None
+
+
+class AutomationRunResponse(BaseModel):
+    id: int
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    status: str
+    jobs_found: int
+    jobs_tailored: int
+    emails_sent: int
+    detail: str = ""
+
+    model_config = {"from_attributes": True}
+
+
 class UserProfileCreate(BaseModel):
     full_name: str
     email: EmailStr
@@ -14,6 +271,22 @@ class UserProfileCreate(BaseModel):
     summary: str = ""
     target_roles: str = ""
     target_countries: str = ""
+
+
+class RoleSuggestResponse(BaseModel):
+    roles: list[str]
+    message: str = ""
+
+
+class SearchCriteriaSuggestResponse(BaseModel):
+    roles: list[str] = Field(default_factory=list)
+    locations: list[str] = Field(default_factory=list)
+    seniority_levels: list[str] = Field(default_factory=list)
+    posted_within_hours: int = 168
+    min_salary: Optional[int] = None
+    max_salary: Optional[int] = None
+    summary: str = ""
+    message: str = ""
 
 
 class UserProfileUpdate(BaseModel):
@@ -58,8 +331,13 @@ class JobResponse(BaseModel):
     description: str
     url: str
     experience_level: str
+    seniority_level: str = ""
     offers_relocation: bool
     relocation_keywords: str
+    salary_min: Optional[int] = None
+    salary_max: Optional[int] = None
+    salary_currency: str = ""
+    salary_text: str = ""
     posted_at: Optional[datetime]
     relevance_score: float
     scraped_at: datetime
@@ -87,6 +365,42 @@ class JobApplicationResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class JobImportRequest(BaseModel):
+    url: str = Field(min_length=4)
+
+
+class JobImportPreviewResponse(BaseModel):
+    url: str
+    title: str = ""
+    company: str = ""
+    company_domain: str = ""
+    location: str = ""
+    description: str = ""
+    posted_at: Optional[datetime] = None
+    salary_min: Optional[int] = None
+    salary_max: Optional[int] = None
+    salary_currency: str = ""
+    salary_text: str = ""
+    scraped: bool = False
+    missing: list[str] = Field(default_factory=list)
+    message: str = ""
+
+
+class ManualJobRequest(BaseModel):
+    url: str = Field(min_length=4)
+    title: str = Field(min_length=1)
+    company: str = Field(min_length=1)
+    location: str = ""
+    description: str = ""
+    company_domain: str = ""
+    posted_at: Optional[datetime] = None
+    salary_min: Optional[int] = None
+    salary_max: Optional[int] = None
+    salary_currency: str = ""
+    salary_text: str = ""
+    seniority_level: str = ""
+
+
 class ContactResponse(BaseModel):
     name: str
     email: str
@@ -109,9 +423,23 @@ class OutreachEmailResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+SENIORITY_LEVELS = ("intern", "entry", "mid", "senior", "executive")
+
+
 class JobSearchRequest(BaseModel):
-    user_profile_id: int
     max_jobs: int = Field(default=100, le=100)
+    # Which seniority levels to include. Empty = no seniority filter.
+    seniority_levels: list[str] = Field(default_factory=list)
+    # Freshness window in hours (e.g. 24, 48, 168, 336). Defaults to 48h.
+    posted_within_hours: int = Field(default=48, ge=1, le=2160)
+    # Optional annual salary bounds (in the user's currency, best-effort).
+    min_salary: Optional[int] = Field(default=None, ge=0)
+    max_salary: Optional[int] = Field(default=None, ge=0)
+    # Optional explicit locations; overrides the profile's target countries
+    # for this search when provided.
+    locations: list[str] = Field(default_factory=list)
+    # Optional role keywords for this search; overrides profile target_roles.
+    roles: list[str] = Field(default_factory=list)
 
 
 class TailorDocumentsRequest(BaseModel):
@@ -138,3 +466,4 @@ class SearchStatsResponse(BaseModel):
     jobs_filtered_experience: int
     jobs_filtered_role: int
     jobs_filtered_country: int
+    jobs_filtered_salary: int = 0

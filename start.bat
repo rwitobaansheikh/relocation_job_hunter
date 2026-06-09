@@ -1,5 +1,5 @@
 @echo off
-echo Starting Relocation Job Hunter...
+echo Starting Job Application Flow...
 
 start "Backend" cmd /k "cd /d %~dp0backend && venv\Scripts\activate && uvicorn app.main:app --reload --port 8000"
 timeout /t 3 /nobreak > nul

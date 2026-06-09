@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
+import JobDescription from '../components/JobDescription'
 import { useProfile } from '../ProfileContext'
 
 const STATUS_OPTIONS = ['', 'discovered', 'tailored', 'applied', 'follow_up_sent', 'interview', 'rejected', 'replied']
@@ -17,6 +18,7 @@ export default function Applications() {
   const [expandedContacts, setExpandedContacts] = useState(null)
   const [loadingContacts, setLoadingContacts] = useState(null)
   const [expandedAnalysis, setExpandedAnalysis] = useState(null)
+  const [expandedDesc, setExpandedDesc] = useState(null)
 
   const parseAnalysis = (app) => {
     try {
@@ -30,7 +32,7 @@ export default function Applications() {
     if (!profile?.id) return
     setLoading(true)
     try {
-      const apps = await api.getApplications(profile.id, filter || undefined)
+      const apps = await api.getApplications(filter || undefined)
       setApplications(apps)
     } catch (err) {
       console.error(err)
@@ -45,8 +47,14 @@ export default function Applications() {
     setActionMsg(null)
     try {
       if (action === 'tailor') {
-        await api.tailorSingle(appId)
-        setActionMsg({ type: 'success', text: 'Documents tailored successfully' })
+        const app = await api.tailorSingle(appId)
+        const usedAi = app.tailored_cv_path?.includes('/app_') || app.tailored_cv_path?.includes('generated/app_')
+        setActionMsg({
+          type: 'success',
+          text: usedAi
+            ? 'AI-tailored CV and cover letter generated for this role.'
+            : 'Documents updated.',
+        })
       } else if (action === 'send') {
         await api.sendOutreach(appId, false)
         setActionMsg({ type: 'success', text: 'Outreach emails sent' })
@@ -58,7 +66,7 @@ export default function Applications() {
         const emails = await api.sendOutreach(appId, false, true)
         const result = emails[0]
         if (result?.status === 'test_sent') {
-          setActionMsg({ type: 'success', text: `Test email sent to ${result.recipient_email}. Check your inbox.` })
+          setActionMsg({ type: 'success', text: `Test email sent to your registered address (${result.recipient_email}). Check your inbox.` })
         } else {
           setActionMsg({ type: 'error', text: `Test send failed: ${result?.error_message || 'unknown error'}` })
         }
@@ -81,8 +89,17 @@ export default function Applications() {
       if (discovered.length === 0) {
         setActionMsg({ type: 'info', text: 'No discovered applications to tailor' })
       } else {
-        await api.tailorDocuments(discovered)
-        setActionMsg({ type: 'success', text: `Tailored ${discovered.length} applications` })
+        const tailored = await api.tailorDocuments(discovered)
+        if (tailored.length === 0) {
+          setActionMsg({ type: 'info', text: 'No applications were tailored.' })
+        } else if (tailored.length < discovered.length) {
+          setActionMsg({
+            type: 'success',
+            text: `AI-tailored ${tailored.length} of ${discovered.length} applications. Retry the rest if the LLM was busy.`,
+          })
+        } else {
+          setActionMsg({ type: 'success', text: `AI-tailored ${tailored.length} application(s).` })
+        }
         await loadApps()
       }
     } catch (err) {
@@ -107,7 +124,7 @@ export default function Applications() {
     setBusy('clear')
     setActionMsg(null)
     try {
-      const res = await api.deleteAllApplications(profile.id)
+      const res = await api.deleteAllApplications()
       setActionMsg({ type: 'success', text: `Removed ${res.deleted} job(s)` })
       await loadApps()
     } catch (err) {
@@ -194,6 +211,10 @@ export default function Applications() {
                 <h3>{app.job?.title || 'Unknown Role'}</h3>
                 <div className="meta">
                   {app.job?.company} · {app.job?.location} · Score: {app.job?.relevance_score}
+                  {app.job?.seniority_level && app.job.seniority_level !== 'unspecified' && (
+                    ` · ${app.job.seniority_level}`
+                  )}
+                  {app.job?.salary_text && ` · ${app.job.salary_text}`}
                   {app.ai_match_score > 0 && (
                     <strong style={{ color: 'var(--accent)' }}> · AI Match: {app.ai_match_score}/100</strong>
                   )}
@@ -232,6 +253,11 @@ export default function Applications() {
                     </button>
                   </>
                 )}
+                {app.job?.description && (
+                  <button className="btn-secondary" onClick={() => setExpandedDesc(expandedDesc === app.id ? null : app.id)}>
+                    {expandedDesc === app.id ? 'Hide Description' : 'View Description'}
+                  </button>
+                )}
                 {app.analysis_json && (
                   <button className="btn-secondary" onClick={() => setExpandedAnalysis(expandedAnalysis === app.id ? null : app.id)}>
                     {expandedAnalysis === app.id ? 'Hide Analysis' : 'View Analysis'}
@@ -258,6 +284,25 @@ export default function Applications() {
                   ))}
                 </select>
               </div>
+
+              {expandedDesc === app.id && (
+                <div className="email-records">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 600 }}>Job Description</div>
+                    {app.job?.url && (
+                      <a href={app.job.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.85rem' }}>
+                        Open original post →
+                      </a>
+                    )}
+                  </div>
+                  {app.job?.salary_text && (
+                    <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem', color: 'var(--text-muted)' }}>
+                      <strong>Salary:</strong> {app.job.salary_text}
+                    </div>
+                  )}
+                  <JobDescription html={app.job?.description} />
+                </div>
+              )}
 
               {expandedAnalysis === app.id && (() => {
                 const a = parseAnalysis(app)

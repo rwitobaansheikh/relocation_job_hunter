@@ -10,13 +10,17 @@ beautifulsoup4>=4.12.3
 lxml>=5.3.0
 feedparser>=6.0.11
 markdown>=3.7
-# Pinned <0.2.12: newer releases pull in pycairo (requires system cairo libs).
-xhtml2pdf==0.2.11
+# PDF rendering: WeasyPrint gives real CSS (fl/floats/web fonts) so generated
+# CVs/cover letters match the designed template instead of a "wall of text".
+# Needs system libs (pango/cairo/gdk-pixbuf) - installed in the Dockerfile.
+weasyprint>=62.0
+jinja2>=3.1.0
 python-docx>=1.1.2
 pypdf>=5.1.0
 aiosmtplib>=3.0.2
 email-validator>=2.2.0
 apscheduler>=3.10.4
 python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
+bcrypt>=4.0.0
 aiofiles>=24.1.0
+stripe>=10.0.0

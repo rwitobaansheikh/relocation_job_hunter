@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import httpx
 
 from app.config import settings
+from app.services import rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class EmailFinder:
 
     async def _verify_email(self, client: httpx.AsyncClient, email: str) -> str:
         try:
+            await rate_limiter.acquire("hunter")
             response = await client.get(
                 f"{self.hunter_base}/email-verifier",
                 params={"email": email, "api_key": settings.hunter_api_key},
@@ -88,6 +90,7 @@ class EmailFinder:
     ) -> list[Contact]:
         """Unfiltered domain search, prioritizing hiring-related titles."""
         try:
+            await rate_limiter.acquire("hunter")
             response = await client.get(
                 f"{self.hunter_base}/domain-search",
                 params={
@@ -123,6 +126,7 @@ class EmailFinder:
         self, client: httpx.AsyncClient, domain: str, department: str, limit: int
     ) -> list[Contact]:
         try:
+            await rate_limiter.acquire("hunter")
             response = await client.get(
                 f"{self.hunter_base}/domain-search",
                 params={

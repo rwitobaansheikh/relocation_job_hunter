@@ -1,0 +1,21 @@
+# Optional Cloudflare Tunnel sidecar for serving the app on a custom domain
+# (e.g. jobapplicationflow.com) with TLS terminated by Cloudflare and no inbound
+# ports required on the EC2 instance.
+#
+# Usage (on the instance, alongside the base compose):
+#   docker compose -f docker-compose.yml -f docker-compose.cloudflared.yml up -d
+#
+# Prereqs:
+#   1. In Cloudflare Zero Trust > Networks > Tunnels, create a tunnel and copy
+#      its token into CLOUDFLARE_TUNNEL_TOKEN in /opt/app/.env (the APP_ENV secret).
+#   2. Add a Public Hostname to the tunnel:
+#        Hostname: jobapplicationflow.com  (and www.jobapplicationflow.com)
+#        Service:  http://app:8000
+#   Cloudflare creates the DNS records automatically and serves HTTPS for you.
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - app

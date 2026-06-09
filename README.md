@@ -1,13 +1,14 @@
-# Relocation Job Hunter
+# Job Application Flow
 
-Automated job hunting tool that finds relocation-friendly graduate/junior/intern roles, generates tailored CVs and cover letters, and sends outreach emails to hiring teams.
+Automated job search platform that discovers roles across major job boards, suggests target job titles from your CV, generates tailored CVs and cover letters, and sends outreach emails to hiring teams.
 
 ## Features
 
 - **Job scraping** from LinkedIn (public guest search) plus relocation-friendly sources (RemoteOK, Remotive, We Work Remotely, Relocate.me)
-- **Smart filtering** for roles posted in the last 48 hours at graduate, junior, or intern level (relocation/visa support boosts ranking but is not required)
+- **Smart filtering** by seniority, location, salary and posted date; relocation/visa support boosts ranking when relevant
+- **AI role suggestions** from your uploaded CV and cover letter
 - **CV-based relevance scoring** to rank up to 100 best-matching jobs
-- **AI document tailoring** — generates a per-job one-page CV and cover letter (PDF) using Google Gemini, with an AI match score, score breakdown, and gap analysis
+- **AI document tailoring** — generates a per-job one-page CV and cover letter (PDF) using a local LLM (Ollama), with match score, score breakdown, and gap analysis
 - **Email outreach** — finds up to 5 contacts per company via Hunter.io and sends tailored applications
 - **Web dashboard** — upload documents, track applications, manage follow-ups
 
@@ -35,10 +36,11 @@ relocation-job-hunter/
 
 - Python 3.11+
 - Node.js 18+
-- API keys (see `.env.example`):
-  - **Google Gemini** — for CV/cover letter tailoring
+- **Ollama** (local LLM, default) — [install Ollama](https://ollama.com), then `ollama pull llama3.2:3b`
+- Optional API keys (see `.env.example`):
   - **Hunter.io** — for finding/verifying hiring manager emails (optional; falls back to generic addresses)
   - **SMTP** — for sending outreach emails (Gmail app password works)
+  - **Google Gemini** — only if you set `LLM_PROVIDER=gemini` instead of local Ollama
 
 ## Setup
 
@@ -56,10 +58,35 @@ source venv/bin/activate
 
 pip install -r requirements.txt
 cp ../.env.example .env
-# Edit .env with your API keys
+# Edit .env (SMTP, Hunter, etc.)
 
 uvicorn app.main:app --reload --port 8000
 ```
+
+### Local LLM (Ollama)
+
+CV tailoring, outreach emails, and search suggestions use **Ollama** on your GPU by default — no cloud API key or per-token billing.
+
+```bash
+# Install Ollama from https://ollama.com, then pull a small instruct model:
+ollama pull llama3.2:3b
+
+# Verify:
+curl http://localhost:11434/api/tags
+curl http://localhost:8000/health   # should show llm.status: ok
+```
+
+Recommended models (light GPU / prose + JSON):
+
+| Model | VRAM | Notes |
+|-------|------|-------|
+| `llama3.2:3b` | ~2 GB | Default; fast for emails and cover letters |
+| `mistral:7b-instruct` | ~5 GB | Better prose quality |
+| `qwen2.5:7b-instruct` | ~5 GB | Stronger structured JSON for CVs |
+
+Set `OLLAMA_MODEL` in `backend/.env`. For heavier tailoring quality, use a 7B model; prose tasks do not need 70B models.
+
+**AWS production:** run Ollama as a sidecar (see `docker-compose.yml`) on a GPU instance (`g4dn.xlarge` etc.), set `OLLAMA_BASE_URL=http://ollama:11434`, and pull the model on first boot. No Gemini key required unless you switch `LLM_PROVIDER=gemini`.
 
 ### 2. Frontend
 
@@ -73,8 +100,8 @@ Open http://localhost:5173 in your browser.
 
 ## Usage Flow
 
-1. **Profile** — Create your profile with name, skills, target roles/countries
-2. **Upload** — Upload your CV (PDF/DOCX) and baseline cover letter
+1. **Profile** — Create your profile with name, skills, and locations
+2. **Upload** — Upload your CV (PDF/DOCX) and baseline cover letter; use **Analyze CV & suggest roles** or enter your own target roles
 3. **Search** — Run a job search to find up to 100 relevant relocation-friendly roles
 4. **Tailor** — Generate tailored CV and cover letter for each application
 5. **Outreach** — Preview (dry run) or send emails to hiring contacts
@@ -154,7 +181,7 @@ Note the outputs — you'll need them for the GitHub secrets below:
 | `EC2_HOST` | Terraform output `instance_public_ip` |
 | `EC2_USER` | `ec2-user` |
 | `EC2_SSH_KEY` | The **private** key matching `ssh_public_key` |
-| `APP_ENV` | Full contents of a filled-in `.env.production.example` (Gemini/Hunter/SMTP keys, etc.) |
+| `APP_ENV` | Full contents of a filled-in `.env.production.example` (Gemini/Hunter/SMTP keys, plus the now-required `JWT_SECRET` and `ENCRYPTION_KEY`) |
 
 ### 3. Deploy
 
@@ -171,11 +198,96 @@ Once finished, open the `app_url` output (`http://<elastic-ip>`).
   single-user tool.
 - **Backups**: everything stateful lives under `/data` on the instance — snapshot
   the EBS volume or `scp` `/data` to back up.
-- **HTTPS/domain (later)**: port 443 is already open in the security group. To add
-  TLS, put Caddy or nginx + Let's Encrypt in front (or an ALB + ACM cert) and add
-  your domain to `CORS_ORIGINS`.
 - **Rate limits**: tailoring + per-contact email generation make several Gemini
   calls; on the free tier you may hit `429`. Consider enabling billing for steady use.
+
+### Custom domain + HTTPS (jobapplicationflow.com via Cloudflare)
+
+The domain is registered at **Ionos** and routed through **Cloudflare**. Two
+supported paths — the Tunnel option is recommended (no inbound ports, free TLS):
+
+**A. Cloudflare Tunnel (recommended)**
+
+1. Point the domain at Cloudflare: in the Ionos control panel set the domain's
+   nameservers to the two Cloudflare nameservers shown when you add the site in
+   the Cloudflare dashboard (Add a site → Free plan). DNS propagation takes a
+   few minutes to a few hours.
+2. In **Cloudflare Zero Trust → Networks → Tunnels**, create a tunnel and copy
+   its **token** into `CLOUDFLARE_TUNNEL_TOKEN` in the `APP_ENV` secret.
+3. Add **Public Hostnames** to the tunnel:
+   - `jobapplicationflow.com` → Service `http://app:8000`
+   - `www.jobapplicationflow.com` → Service `http://app:8000`
+   Cloudflare auto-creates the proxied DNS records and serves HTTPS.
+4. Deploy with the sidecar:
+   `docker compose -f docker-compose.yml -f docker-compose.cloudflared.yml up -d`.
+   You can then tighten the security group to drop inbound 80/443 entirely.
+
+**B. Cloudflare proxy to the Elastic IP**
+
+1. Same nameserver delegation from Ionos to Cloudflare as above.
+2. In Cloudflare **DNS**, add a proxied (orange-cloud) `A` record for
+   `jobapplicationflow.com` (and `www`) pointing at the EC2 **Elastic IP**.
+3. Set **SSL/TLS → Overview** mode to **Full**. For a valid origin leg, install
+   a Cloudflare **Origin Certificate** behind Caddy/nginx on port 443
+   (port 443 is already open in the security group); "Flexible" works without an
+   origin cert but leaves the Cloudflare↔origin hop unencrypted.
+
+For both paths, add the domain to `CORS_ORIGINS` (already done in
+`.env.production.example`).
+
+Note: the billing page localizes the displayed price using Cloudflare's
+`CF-IPCountry` request header, which is only present when traffic is **proxied
+through Cloudflare** (orange-cloud or Tunnel). Direct-to-IP access falls back to
+USD display. The actual charge currency is handled by Stripe Adaptive Pricing.
+
+## Plans & billing (Stripe)
+
+Subscriptions are optional: with no Stripe keys set, every account stays on the
+free trial and an admin can grant **Unlimited access** to specific users from the
+Admin page (useful for the dev/QA team).
+
+Tiers (USD base price; Stripe Adaptive Pricing charges each buyer in their local
+currency):
+
+| Plan | Price | Automation loops | Auto applies / loop / day | Manual applies / day |
+| --- | --- | --- | --- | --- |
+| Free trial (7 days) | - | 1 | 5 | 20 |
+| Basic | $15 | 1 | 5 | 20 |
+| Standard | $25 | 3 | 20 | 100 |
+| Pro | $45 | 5 | 25 | 300 |
+
+Loops are hard-capped at 5 even for unlimited/superusers. A "manual application"
+is one `Send Outreach` action on a job (independent of how many contacts get
+emailed). Automated sends are capped per loop per day.
+
+To enable payments:
+
+1. In the **Stripe dashboard**, create one **recurring USD Price** per tier and
+   put the price IDs in `STRIPE_PRICE_BASIC/STANDARD/PRO`.
+2. Enable **Adaptive Pricing** (Settings → Payments) so checkout shows the
+   buyer's local currency automatically.
+3. Add a **webhook** endpoint at `https://jobapplicationflow.com/api/webhooks/stripe`
+   subscribed to `checkout.session.completed`, `customer.subscription.*`, and
+   `invoice.payment_failed`; copy the signing secret into `STRIPE_WEBHOOK_SECRET`.
+4. Set `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, and
+   `APP_BASE_URL=https://jobapplicationflow.com` in the `APP_ENV` secret.
+
+The webhook keeps each user's `plan`/status in sync; plan limits are then
+enforced server-side on sending and loop creation.
+
+## Data & privacy (GDPR)
+
+Users can exercise the right to erasure themselves: **Settings → Delete account**
+(requires password + typing `DELETE`). This calls `DELETE /api/account`, which:
+
+- cancels any active Stripe subscription (best-effort),
+- erases the user, profile, applications, outreach emails, automation loops/runs,
+  usage counters, and any reviews/contact messages they submitted (matched by
+  email), and
+- deletes their uploaded CV/cover letter and all generated PDFs from disk.
+
+Shared, non-personal records (deduplicated `jobs`, aggregate `api_usage`) are
+retained. The action is irreversible.
 
 ## License
 

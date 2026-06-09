@@ -11,7 +11,7 @@ import logging
 import re
 from typing import Optional
 
-from app.services.gemini import gemini_generate
+from app.services.llm import llm_generate, resolve_gemini_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,12 @@ END_OF_JSON"""
 
 class JobAnalyzer:
     async def analyze(
-        self, company: str, job_description: str, resume_text: str
+        self,
+        company: str,
+        job_description: str,
+        resume_text: str,
+        api_key: Optional[str] = None,
+        profile=None,
     ) -> Optional[dict]:
         """Return the structured analysis dict, or None if generation/parse fails."""
         if not resume_text:
@@ -137,8 +142,13 @@ class JobAnalyzer:
             .replace("{{RESUME}}", (resume_text or "")[:8000])
         )
 
-        raw = await gemini_generate(
-            prompt, system=SYSTEM_INSTRUCTION, temperature=0.4, max_tokens=4096
+        raw = await llm_generate(
+            prompt,
+            system=SYSTEM_INSTRUCTION,
+            temperature=0.4,
+            max_tokens=4096,
+            api_key=api_key or resolve_gemini_api_key(profile),
+            json_mode=True,
         )
         if not raw:
             return None

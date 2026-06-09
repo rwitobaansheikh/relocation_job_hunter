@@ -55,10 +55,13 @@ class LinkedInScraper:
         roles: Optional[list[str]] = None,
         locations: Optional[list[str]] = None,
         age_hours: int = 48,
+        experience_codes: Optional[str] = None,
+        salary_bucket: Optional[str] = None,
     ) -> list[RawJob]:
         role_terms = [r for r in (roles or []) if r][: self.MAX_ROLES] or [""]
         location_terms = [loc for loc in (locations or []) if loc][: self.MAX_LOCATIONS] or [""]
         seconds = max(int(age_hours), 1) * 3600
+        fe_codes = experience_codes or self.EXPERIENCE_CODES
 
         cards: dict[str, dict] = {}
         async with httpx.AsyncClient(
@@ -74,7 +77,9 @@ class LinkedInScraper:
                         if len(cards) >= limit:
                             break
                         start = page * self.PAGE_SIZE
-                        found = await self._search(client, role, location, seconds, start)
+                        found = await self._search(
+                            client, role, location, seconds, start, fe_codes, salary_bucket
+                        )
                         if not found:
                             break  # no more results for this query
                         for card in found:
@@ -113,13 +118,22 @@ class LinkedInScraper:
         return jobs
 
     async def _search(
-        self, client: httpx.AsyncClient, keywords: str, location: str, seconds: int, start: int = 0
+        self,
+        client: httpx.AsyncClient,
+        keywords: str,
+        location: str,
+        seconds: int,
+        start: int = 0,
+        fe_codes: Optional[str] = None,
+        salary_bucket: Optional[str] = None,
     ) -> list[dict]:
         params: dict[str, object] = {
             "f_TPR": f"r{seconds}",
-            "f_E": self.EXPERIENCE_CODES,
+            "f_E": fe_codes or self.EXPERIENCE_CODES,
             "start": start,
         }
+        if salary_bucket:
+            params["f_SB2"] = salary_bucket
         if keywords:
             params["keywords"] = keywords
         if location:

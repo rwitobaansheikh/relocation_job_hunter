@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @page { size: letter; margin: 1in 1in; }
+
+    body {
+      font-family: "Times New Roman", "DejaVu Serif", Georgia, serif;
+      font-size: 11pt;
+      line-height: 1.4;
+      color: #000;
+      margin: 0;
+    }
+
+    a { color: #1a0dab; text-decoration: none; }
+
+    .header { text-align: center; margin-bottom: 18pt; }
+    .header .name {
+      font-variant: small-caps;
+      font-size: 19pt;
+      font-weight: bold;
+      letter-spacing: 1px;
+      margin: 0 0 2pt 0;
+    }
+    .header .contact { font-size: 9.5pt; }
+    .header .contact .sep { padding: 0 4pt; }
+
+    .body p { margin: 0 0 10pt 0; text-align: justify; }
+    .body ul { margin: 0 0 10pt 18pt; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="name">{{ name }}</div>
+    <div class="contact">
+      {%- set parts = [] -%}
+      {%- if contact.phone %}{% set _ = parts.append(contact.phone) %}{% endif -%}
+      {%- for link in contact_links -%}{% set _ = parts.append(link) %}{%- endfor -%}
+      {%- for part in parts -%}
+        {{ part|safe }}{% if not loop.last %}<span class="sep">|</span>{% endif %}
+      {%- endfor -%}
+    </div>
+  </div>
+
+  <div class="body">
+    {{ body_html|safe }}
+  </div>
+</body>
+</html>

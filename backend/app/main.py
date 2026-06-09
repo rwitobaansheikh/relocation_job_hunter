@@ -9,7 +9,10 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
-from app.routes import router
+from app.routes import auth_router, router
+from app.routes_admin import admin_router
+from app.routes_billing import billing_router, webhook_router
+from app.services.scheduler import shutdown_scheduler, start_scheduler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,11 +24,18 @@ async def lifespan(app: FastAPI):
     Path(settings.generated_dir).mkdir(parents=True, exist_ok=True)
     init_db()
     logger.info("Database initialized")
+    logger.info(
+        "LLM provider=%s model=%s",
+        settings.llm_provider,
+        settings.ollama_model if settings.llm_provider == "ollama" else settings.gemini_model,
+    )
+    start_scheduler()
     yield
+    shutdown_scheduler()
 
 
 app = FastAPI(
-    title="Relocation Job Hunter",
+    title="Job Application Flow",
     description="Automated job search, tailoring, and outreach for relocation-friendly roles",
     version="0.1.0",
     lifespan=lifespan,
@@ -39,12 +49,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(router)
+app.include_router(admin_router)
+app.include_router(billing_router)
+app.include_router(webhook_router)
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok"}
+async def health():
+    from app.services.llm import llm_health
+
+    llm = await llm_health()
+    overall = "ok" if llm.get("status") in ("ok", "configured") else "degraded"
+    return {"status": overall, "llm": llm}
 
 
 # Serve the built React frontend (if present) from the same origin as the API.

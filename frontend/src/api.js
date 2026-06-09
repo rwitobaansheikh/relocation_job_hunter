@@ -1,76 +1,134 @@
 const API_BASE = '/api'
 
+const TOKEN_KEY = 'jh_token'
+let authToken = localStorage.getItem(TOKEN_KEY) || null
+
+export function setToken(token) {
+  authToken = token || null
+  if (token) localStorage.setItem(TOKEN_KEY, token)
+  else localStorage.removeItem(TOKEN_KEY)
+}
+
+export function getToken() {
+  return authToken
+}
+
 async function request(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-  })
+  const isForm = options.body instanceof FormData
+  const headers = { ...options.headers }
+  if (!isForm) headers['Content-Type'] = 'application/json'
+  if (authToken) headers['Authorization'] = `Bearer ${authToken}`
+
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers })
+
+  if (res.status === 401) {
+    setToken(null)
+    // Let the auth layer react (clear user, redirect to login).
+    window.dispatchEvent(new Event('auth:unauthorized'))
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail || 'Request failed')
   }
+  if (res.status === 204) return null
   return res.json()
 }
 
+function upload(path, file) {
+  const form = new FormData()
+  form.append('file', file)
+  return request(path, { method: 'POST', body: form })
+}
+
 export const api = {
-  createProfile: (data) => request('/profiles', { method: 'POST', body: JSON.stringify(data) }),
-  getProfiles: () => request('/profiles'),
-  getProfile: (id) => request(`/profiles/${id}`),
-  updateProfile: (id, data) => request(`/profiles/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  // --- Auth ---
+  register: (data) => request('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
+  login: (data) => request('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
+  me: () => request('/auth/me'),
+  deleteAccount: (password) =>
+    request('/account', { method: 'DELETE', body: JSON.stringify({ password, confirm: 'DELETE' }) }),
 
-  uploadCV: async (profileId, file) => {
-    const form = new FormData()
-    form.append('file', file)
-    const res = await fetch(`${API_BASE}/profiles/${profileId}/upload-cv`, { method: 'POST', body: form })
-    if (!res.ok) throw new Error('CV upload failed')
-    return res.json()
-  },
+  // --- Profile (current user) ---
+  getProfile: () => request('/profile'),
+  updateProfile: (data) => request('/profile', { method: 'PATCH', body: JSON.stringify(data) }),
+  uploadCV: (file) => upload('/profile/upload-cv', file),
+  uploadCoverLetter: (file) => upload('/profile/upload-cover-letter', file),
+  suggestRoles: () => request('/profile/suggest-roles', { method: 'POST' }),
+  suggestSearchCriteria: () => request('/profile/suggest-search-criteria', { method: 'POST' }),
 
-  uploadCoverLetter: async (profileId, file) => {
-    const form = new FormData()
-    form.append('file', file)
-    const res = await fetch(`${API_BASE}/profiles/${profileId}/upload-cover-letter`, { method: 'POST', body: form })
-    if (!res.ok) throw new Error('Cover letter upload failed')
-    return res.json()
-  },
+  // --- Settings ---
+  getSettings: () => request('/settings'),
+  updateSettings: (data) => request('/settings', { method: 'PATCH', body: JSON.stringify(data) }),
 
-  searchJobs: (userProfileId, maxJobs = 100) =>
-    request('/jobs/search', { method: 'POST', body: JSON.stringify({ user_profile_id: userProfileId, max_jobs: maxJobs }) }),
+  // --- Jobs ---
+  searchJobs: (payload = {}) =>
+    request('/jobs/search', {
+      method: 'POST',
+      body: JSON.stringify({ max_jobs: 100, ...payload }),
+    }),
 
-  getApplications: (profileId, status) => {
+  importJob: (url) =>
+    request('/jobs/import', { method: 'POST', body: JSON.stringify({ url }) }),
+
+  addManualJob: (payload) =>
+    request('/jobs/manual', { method: 'POST', body: JSON.stringify(payload) }),
+
+  // --- Applications ---
+  getApplications: (status) => {
     const params = new URLSearchParams()
-    if (profileId) params.set('profile_id', profileId)
     if (status) params.set('status', status)
-    return request(`/applications?${params}`)
+    const qs = params.toString()
+    return request(`/applications${qs ? `?${qs}` : ''}`)
   },
-
-  deleteAllApplications: (profileId) =>
-    request(`/applications?profile_id=${profileId}`, { method: 'DELETE' }),
-
+  deleteAllApplications: () => request('/applications', { method: 'DELETE' }),
   tailorDocuments: (applicationIds) =>
     request('/applications/tailor', { method: 'POST', body: JSON.stringify({ application_ids: applicationIds }) }),
-
   tailorSingle: (applicationId) =>
     request(`/applications/${applicationId}/tailor`, { method: 'POST' }),
-
   sendOutreach: (applicationId, dryRun = false, testToSelf = false) =>
     request('/applications/send-outreach', {
       method: 'POST',
       body: JSON.stringify({ application_id: applicationId, dry_run: dryRun, test_to_self: testToSelf }),
     }),
-
   scheduleFollowUp: (applicationId, notes, scheduleNextDays = 7) =>
     request('/applications/follow-up', {
       method: 'POST',
       body: JSON.stringify({ application_id: applicationId, notes, schedule_next_days: scheduleNextDays }),
     }),
-
   updateStatus: (applicationId, status) =>
     request(`/applications/${applicationId}/status?status=${status}`, { method: 'PATCH' }),
-
-  getDashboardStats: (profileId) => request(`/dashboard/stats?profile_id=${profileId}`),
-
+  getDashboardStats: () => request('/dashboard/stats'),
   getOutreachEmails: (applicationId) => request(`/applications/${applicationId}/emails`),
-
   getContacts: (applicationId) => request(`/applications/${applicationId}/contacts`),
+  getAutomationRuns: () => request('/automation/runs'),
+
+  // --- Automation loops ---
+  getLoops: () => request('/automation/loops'),
+  createLoop: (data) => request('/automation/loops', { method: 'POST', body: JSON.stringify(data) }),
+  updateLoop: (loopId, data) =>
+    request(`/automation/loops/${loopId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteLoop: (loopId) => request(`/automation/loops/${loopId}`, { method: 'DELETE' }),
+
+  // --- Billing ---
+  getBilling: () => request('/billing'),
+  checkout: (tier) => request('/billing/checkout', { method: 'POST', body: JSON.stringify({ tier }) }),
+  openPortal: () => request('/billing/portal', { method: 'POST' }),
+
+  // --- Feedback / reviews / contact (public) ---
+  getReviews: () => request('/reviews'),
+  submitReview: (data) => request('/reviews', { method: 'POST', body: JSON.stringify(data) }),
+  submitContact: (data) => request('/contact', { method: 'POST', body: JSON.stringify(data) }),
+
+  // --- Admin ---
+  getUsers: () => request('/admin/users'),
+  updateUser: (userId, data) => request(`/admin/users/${userId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  getAdminStats: () => request('/admin/stats'),
+  setKillSwitch: (enabled) =>
+    request('/admin/automation/kill-switch', { method: 'POST', body: JSON.stringify({ enabled }) }),
+  getFeedback: (kind) => request(`/admin/feedback${kind ? `?kind=${kind}` : ''}`),
+  updateFeedback: (id, data) =>
+    request(`/admin/feedback/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteFeedback: (id) => request(`/admin/feedback/${id}`, { method: 'DELETE' }),
 }
+
+export const CONTACT_EMAIL = 'rwitobaansheikh@gmail.com'

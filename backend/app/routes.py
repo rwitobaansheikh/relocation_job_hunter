@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -6,60 +7,237 @@ import aiofiles
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session, joinedload
 
+from app.auth import (
+    create_access_token,
+    get_current_profile,
+    get_current_user,
+)
 from app.config import settings
-from app.database import JobApplication, OutreachEmail, UserProfile, get_db
+from app.database import (
+    AutomationLoop,
+    AutomationRun,
+    Feedback,
+    Job,
+    JobApplication,
+    OutreachEmail,
+    User,
+    UserProfile,
+    UserRole,
+    get_db,
+)
 from app.schemas import (
+    AutomationLoopCreate,
+    AutomationLoopResponse,
+    AutomationLoopUpdate,
+    AutomationRunResponse,
+    ContactCreate,
     ContactResponse,
+    DeleteAccountRequest,
     FollowUpRequest,
     JobApplicationResponse,
+    JobImportPreviewResponse,
+    JobImportRequest,
     JobSearchRequest,
+    LoginRequest,
+    ManualJobRequest,
     OutreachEmailResponse,
+    RegisterRequest,
+    ReviewCreate,
+    ReviewPublic,
+    RoleSuggestResponse,
+    SearchCriteriaSuggestResponse,
     SearchStatsResponse,
+    SENIORITY_LEVELS,
     SendOutreachRequest,
+    SettingsResponse,
+    SettingsUpdate,
     TailorDocumentsRequest,
-    UserProfileCreate,
+    TokenResponse,
     UserProfileResponse,
     UserProfileUpdate,
+    UserResponse,
 )
+from app.security import encrypt_secret, hash_password, verify_password
+from app.services.account import delete_account
 from app.services.document_generator import DocumentGenerator
+from app.services.cv_link_extractor import build_project_link_map, serialize_project_links
 from app.services.document_parser import extract_text_from_file
 from app.services.email_finder import EmailFinder
 from app.services.email_service import EmailService
-from app.services.job_search import JobSearchService
+from app.services.job_matcher import JobMatcher
+from app.services.job_search import JobSearchService, SearchFilters
+from app.services.plans import effective_limits
+from app.services.role_suggester import suggest_roles
+from app.services.search_criteria_suggester import suggest_search_criteria
+from app.services.scraper.base import RawJob
+from app.services.url_importer import import_job_from_url
+from app.services.usage import get_usage, incr_usage
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["api"])
+auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 UPLOAD_DIR = Path(settings.uploads_dir)
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-@router.post("/profiles", response_model=UserProfileResponse)
-def create_profile(data: UserProfileCreate, db: Session = Depends(get_db)):
-    profile = UserProfile(**data.model_dump())
+def _owned_application(
+    db: Session, application_id: int, profile: UserProfile, with_job: bool = False
+) -> JobApplication:
+    """Fetch an application that belongs to the current user, or 404."""
+    query = db.query(JobApplication)
+    if with_job:
+        query = query.options(joinedload(JobApplication.job))
+    app = query.filter(JobApplication.id == application_id).first()
+    if not app or app.user_profile_id != profile.id:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return app
+
+
+# --------------------------------------------------------------------------- #
+# Auth
+# --------------------------------------------------------------------------- #
+@auth_router.post("/register", response_model=TokenResponse)
+def register(data: RegisterRequest, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == data.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    # The very first account becomes an admin so the system is manageable out
+    # of the box without needing the env-based bootstrap.
+    is_first = db.query(User).count() == 0
+    user = User(
+        email=data.email,
+        password_hash=hash_password(data.password),
+        role=UserRole.ADMIN.value if is_first else UserRole.USER.value,
+        is_active=True,
+        plan="trial",
+        plan_status="trialing",
+        trial_end=datetime.utcnow() + timedelta(days=settings.trial_days),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    profile = UserProfile(
+        user_id=user.id,
+        full_name=data.full_name,
+        email=data.email,
+        daily_send_cap=settings.default_daily_send_cap,
+        per_domain_cap=settings.default_per_domain_cap,
+        automation_interval_hours=settings.default_automation_interval_hours,
+        max_tailor_per_run=settings.default_max_tailor_per_run,
+    )
     db.add(profile)
     db.commit()
-    db.refresh(profile)
+
+    return TokenResponse(access_token=create_access_token(user.id), user=user)
+
+
+@auth_router.post("/login", response_model=TokenResponse)
+def login(data: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email).first()
+    if not user or not verify_password(data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account disabled")
+    return TokenResponse(access_token=create_access_token(user.id), user=user)
+
+
+@auth_router.get("/me", response_model=UserResponse)
+def me(user: User = Depends(get_current_user)):
+    return user
+
+
+@router.delete("/account", status_code=204)
+def delete_my_account(
+    data: DeleteAccountRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """GDPR right-to-erasure: cancel any subscription and permanently delete the
+    account and all associated personal data. Irreversible."""
+    if not verify_password(data.password, user.password_hash):
+        raise HTTPException(status_code=403, detail="Password is incorrect")
+    delete_account(db, user)
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# Feedback / reviews / contact (public, no auth required)
+# --------------------------------------------------------------------------- #
+@router.get("/reviews", response_model=list[ReviewPublic])
+def list_reviews(db: Session = Depends(get_db), limit: int = 20):
+    return (
+        db.query(Feedback)
+        .filter(Feedback.kind == "review", Feedback.approved.is_(True))
+        .order_by(Feedback.created_at.desc())
+        .limit(min(max(limit, 1), 100))
+        .all()
+    )
+
+
+@router.post("/reviews", response_model=ReviewPublic)
+def create_review(data: ReviewCreate, db: Session = Depends(get_db)):
+    review = Feedback(
+        kind="review",
+        name=data.name.strip(),
+        email=(data.email or ""),
+        rating=data.rating,
+        message=data.message.strip(),
+        approved=True,
+    )
+    db.add(review)
+    db.commit()
+    db.refresh(review)
+    return review
+
+
+@router.post("/contact")
+async def submit_contact(data: ContactCreate, db: Session = Depends(get_db)):
+    record = Feedback(
+        kind="contact",
+        name=data.name.strip(),
+        email=str(data.email),
+        subject=data.subject.strip(),
+        message=data.message.strip(),
+        approved=True,
+    )
+    db.add(record)
+    db.commit()
+
+    # Best-effort notification to the site owner; never fail the request if the
+    # shared mailbox isn't configured (the message is already stored).
+    emailed = False
+    try:
+        subject = f"[Contact] {data.subject.strip() or 'New message'} - {data.name.strip()}"
+        body = (
+            f"From: {data.name.strip()} <{data.email}>\n"
+            f"Subject: {data.subject.strip() or '(none)'}\n\n"
+            f"{data.message.strip()}\n"
+        )
+        await EmailService().send_system_email(settings.contact_email, subject, body)
+        emailed = True
+    except Exception as exc:  # pragma: no cover - depends on SMTP config
+        logger.warning("Contact email could not be delivered: %s", exc)
+
+    return {"ok": True, "emailed": emailed}
+
+
+# --------------------------------------------------------------------------- #
+# Profile (current user)
+# --------------------------------------------------------------------------- #
+@router.get("/profile", response_model=UserProfileResponse)
+def get_profile(profile: UserProfile = Depends(get_current_profile)):
     return profile
 
 
-@router.get("/profiles", response_model=list[UserProfileResponse])
-def list_profiles(db: Session = Depends(get_db)):
-    return db.query(UserProfile).order_by(UserProfile.created_at.desc()).all()
-
-
-@router.get("/profiles/{profile_id}", response_model=UserProfileResponse)
-def get_profile(profile_id: int, db: Session = Depends(get_db)):
-    profile = db.query(UserProfile).filter(UserProfile.id == profile_id).first()
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
-    return profile
-
-
-@router.patch("/profiles/{profile_id}", response_model=UserProfileResponse)
-def update_profile(profile_id: int, data: UserProfileUpdate, db: Session = Depends(get_db)):
-    profile = db.query(UserProfile).filter(UserProfile.id == profile_id).first()
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
+@router.patch("/profile", response_model=UserProfileResponse)
+def update_profile(
+    data: UserProfileUpdate,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(profile, key, value)
     db.commit()
@@ -67,36 +245,35 @@ def update_profile(profile_id: int, data: UserProfileUpdate, db: Session = Depen
     return profile
 
 
-@router.post("/profiles/{profile_id}/upload-cv", response_model=UserProfileResponse)
-async def upload_cv(profile_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    profile = db.query(UserProfile).filter(UserProfile.id == profile_id).first()
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
-
-    dest = UPLOAD_DIR / f"profile_{profile_id}_cv{Path(file.filename or 'cv.pdf').suffix}"
+@router.post("/profile/upload-cv", response_model=UserProfileResponse)
+async def upload_cv(
+    file: UploadFile = File(...),
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    dest = UPLOAD_DIR / f"profile_{profile.id}_cv{Path(file.filename or 'cv.pdf').suffix}"
     async with aiofiles.open(dest, "wb") as f:
-        content = await file.read()
-        await f.write(content)
+        await f.write(await file.read())
 
     profile.cv_path = str(dest)
     profile.cv_text = extract_text_from_file(str(dest))
+    profile.cv_links_json = serialize_project_links(
+        build_project_link_map(str(dest), profile.cv_text)
+    )
     db.commit()
     db.refresh(profile)
     return profile
 
 
-@router.post("/profiles/{profile_id}/upload-cover-letter", response_model=UserProfileResponse)
+@router.post("/profile/upload-cover-letter", response_model=UserProfileResponse)
 async def upload_cover_letter(
-    profile_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)
+    file: UploadFile = File(...),
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
 ):
-    profile = db.query(UserProfile).filter(UserProfile.id == profile_id).first()
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
-
-    dest = UPLOAD_DIR / f"profile_{profile_id}_cover{Path(file.filename or 'cover.pdf').suffix}"
+    dest = UPLOAD_DIR / f"profile_{profile.id}_cover{Path(file.filename or 'cover.pdf').suffix}"
     async with aiofiles.open(dest, "wb") as f:
-        content = await file.read()
-        await f.write(content)
+        await f.write(await file.read())
 
     profile.baseline_cover_letter_path = str(dest)
     profile.baseline_cover_letter_text = extract_text_from_file(str(dest))
@@ -105,37 +282,243 @@ async def upload_cover_letter(
     return profile
 
 
+@router.post("/profile/suggest-roles", response_model=RoleSuggestResponse)
+async def suggest_profile_roles(profile: UserProfile = Depends(get_current_profile)):
+    """Analyze uploaded CV (+ cover letter) and suggest job roles to target."""
+    roles, message = await suggest_roles(profile)
+    return RoleSuggestResponse(roles=roles, message=message)
+
+
+@router.post("/profile/suggest-search-criteria", response_model=SearchCriteriaSuggestResponse)
+async def suggest_profile_search_criteria(
+    profile: UserProfile = Depends(get_current_profile),
+):
+    """Analyze CV + cover letter and suggest full job-search criteria for high-volume,
+    relevant results (roles, locations, seniority, freshness, salary)."""
+    criteria, message = await suggest_search_criteria(profile)
+    return SearchCriteriaSuggestResponse(message=message, **criteria)
+
+
+# --------------------------------------------------------------------------- #
+# Settings (sending identity + automation)
+# --------------------------------------------------------------------------- #
+def _settings_response(profile: UserProfile) -> SettingsResponse:
+    return SettingsResponse(
+        smtp_host=profile.smtp_host or "",
+        smtp_port=profile.smtp_port or settings.smtp_port,
+        smtp_user=profile.smtp_user or "",
+        smtp_from=profile.smtp_from or "",
+        smtp_password_set=bool(profile.smtp_password_enc),
+        gemini_override_set=bool(profile.gemini_api_key_enc),
+        hunter_override_set=bool(profile.hunter_api_key_enc),
+        automation_enabled=bool(profile.automation_enabled),
+        automation_interval_hours=profile.automation_interval_hours
+        or settings.default_automation_interval_hours,
+        daily_send_cap=profile.daily_send_cap
+        if profile.daily_send_cap is not None
+        else settings.default_daily_send_cap,
+        per_domain_cap=profile.per_domain_cap
+        if profile.per_domain_cap is not None
+        else settings.default_per_domain_cap,
+        max_tailor_per_run=profile.max_tailor_per_run
+        or settings.default_max_tailor_per_run,
+        last_automation_run_at=profile.last_automation_run_at,
+    )
+
+
+@router.get("/settings", response_model=SettingsResponse)
+def get_settings(profile: UserProfile = Depends(get_current_profile)):
+    return _settings_response(profile)
+
+
+@router.patch("/settings", response_model=SettingsResponse)
+def update_settings(
+    data: SettingsUpdate,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    payload = data.model_dump(exclude_unset=True)
+    # Secrets: empty string clears, non-empty encrypts, omitted leaves as-is.
+    if "smtp_password" in payload:
+        profile.smtp_password_enc = encrypt_secret(payload.pop("smtp_password") or "")
+    if "gemini_api_key" in payload:
+        profile.gemini_api_key_enc = encrypt_secret(payload.pop("gemini_api_key") or "")
+    if "hunter_api_key" in payload:
+        profile.hunter_api_key_enc = encrypt_secret(payload.pop("hunter_api_key") or "")
+    for key, value in payload.items():
+        setattr(profile, key, value)
+    db.commit()
+    db.refresh(profile)
+    return _settings_response(profile)
+
+
+# --------------------------------------------------------------------------- #
+# Job search
+# --------------------------------------------------------------------------- #
 @router.post("/jobs/search", response_model=SearchStatsResponse)
-async def search_jobs(request: JobSearchRequest, db: Session = Depends(get_db)):
+async def search_jobs(
+    request: JobSearchRequest,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
     service = JobSearchService()
+    filters = SearchFilters(
+        seniority_levels=[lvl for lvl in request.seniority_levels if lvl in SENIORITY_LEVELS],
+        posted_within_hours=request.posted_within_hours,
+        min_salary=request.min_salary,
+        max_salary=request.max_salary,
+        locations=request.locations,
+        roles=[r.strip() for r in request.roles if r and r.strip()],
+    )
     try:
-        stats = await service.search_jobs(db, request.user_profile_id, request.max_jobs)
+        stats = await service.search_jobs(db, profile.id, request.max_jobs, filters)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return SearchStatsResponse(**stats)
 
 
-@router.get("/applications", response_model=list[JobApplicationResponse])
-def list_applications(
-    profile_id: Optional[int] = None,
-    status: Optional[str] = None,
+# --------------------------------------------------------------------------- #
+# Add a job from a link
+# --------------------------------------------------------------------------- #
+@router.post("/jobs/import", response_model=JobImportPreviewResponse)
+async def import_job(
+    request: JobImportRequest,
+    profile: UserProfile = Depends(get_current_profile),
+):
+    """Best-effort scrape of a pasted job URL. Returns extracted fields plus a
+    `scraped` flag and `missing` list so the UI can ask the user to complete
+    anything that couldn't be parsed. Does not persist anything."""
+    url = request.url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+    data = await import_job_from_url(url)
+    return JobImportPreviewResponse(**data)
+
+
+@router.post("/jobs/manual", response_model=JobApplicationResponse)
+def add_manual_job(
+    request: ManualJobRequest,
+    profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
-    query = db.query(JobApplication).options(joinedload(JobApplication.job))
-    if profile_id:
-        query = query.filter(JobApplication.user_profile_id == profile_id)
+    """Create a job + application from user-provided (and/or imported) details."""
+    url = request.url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+
+    matcher = JobMatcher()
+    raw = RawJob(
+        external_id=f"manual:{url}",
+        source="manual",
+        title=request.title.strip(),
+        company=request.company.strip(),
+        url=url,
+        description=request.description or "",
+        location=request.location or "",
+        company_domain=request.company_domain or "",
+        posted_at=request.posted_at or datetime.utcnow(),
+        tags=[],
+    )
+    seniority = request.seniority_level or matcher.classify_seniority(raw)
+    offers_relocation, relocation_kw = matcher.check_relocation(raw)
+    score = matcher.score_relevance(raw, profile)
+
+    existing = db.query(Job).filter(Job.external_id == raw.external_id).first()
+    if existing:
+        job_record = existing
+        job_record.title = raw.title
+        job_record.company = raw.company
+        job_record.company_domain = raw.company_domain
+        job_record.location = raw.location
+        job_record.description = raw.description
+        job_record.experience_level = seniority
+        job_record.seniority_level = seniority
+        job_record.offers_relocation = offers_relocation
+        job_record.relocation_keywords = relocation_kw
+        job_record.salary_min = request.salary_min
+        job_record.salary_max = request.salary_max
+        job_record.salary_currency = request.salary_currency
+        job_record.salary_text = request.salary_text
+        job_record.posted_at = raw.posted_at
+        job_record.relevance_score = score
+    else:
+        job_record = Job(
+            external_id=raw.external_id,
+            source="manual",
+            title=raw.title,
+            company=raw.company,
+            company_domain=raw.company_domain,
+            location=raw.location,
+            description=raw.description,
+            url=url,
+            experience_level=seniority,
+            seniority_level=seniority,
+            offers_relocation=offers_relocation,
+            relocation_keywords=relocation_kw,
+            salary_min=request.salary_min,
+            salary_max=request.salary_max,
+            salary_currency=request.salary_currency,
+            salary_text=request.salary_text,
+            posted_at=raw.posted_at,
+            relevance_score=score,
+        )
+        db.add(job_record)
+        db.flush()
+
+    app = (
+        db.query(JobApplication)
+        .filter(
+            JobApplication.user_profile_id == profile.id,
+            JobApplication.job_id == job_record.id,
+        )
+        .first()
+    )
+    if not app:
+        app = JobApplication(
+            user_profile_id=profile.id,
+            job_id=job_record.id,
+            status="discovered",
+        )
+        db.add(app)
+    db.commit()
+
+    return (
+        db.query(JobApplication)
+        .options(joinedload(JobApplication.job))
+        .filter(JobApplication.id == app.id)
+        .first()
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Applications (current user)
+# --------------------------------------------------------------------------- #
+@router.get("/applications", response_model=list[JobApplicationResponse])
+def list_applications(
+    status: Optional[str] = None,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    query = (
+        db.query(JobApplication)
+        .options(joinedload(JobApplication.job))
+        .filter(JobApplication.user_profile_id == profile.id)
+    )
     if status:
         query = query.filter(JobApplication.status == status)
     return query.order_by(JobApplication.created_at.desc()).all()
 
 
 @router.delete("/applications")
-def delete_all_applications(profile_id: int, db: Session = Depends(get_db)):
-    """Remove all job applications (and their outreach emails) for a profile."""
+def delete_all_applications(
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    """Remove all job applications (and their outreach emails) for the user."""
     app_ids = [
         a.id
         for a in db.query(JobApplication.id)
-        .filter(JobApplication.user_profile_id == profile_id)
+        .filter(JobApplication.user_profile_id == profile.id)
         .all()
     ]
     if app_ids:
@@ -150,46 +533,71 @@ def delete_all_applications(profile_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/applications/{application_id}", response_model=JobApplicationResponse)
-def get_application(application_id: int, db: Session = Depends(get_db)):
-    app = (
-        db.query(JobApplication)
-        .options(joinedload(JobApplication.job))
-        .filter(JobApplication.id == application_id)
-        .first()
-    )
-    if not app:
-        raise HTTPException(status_code=404, detail="Application not found")
-    return app
+def get_application(
+    application_id: int,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    return _owned_application(db, application_id, profile, with_job=True)
 
 
 @router.patch("/applications/{application_id}/status")
-def update_application_status(application_id: int, status: str, db: Session = Depends(get_db)):
-    app = db.query(JobApplication).filter(JobApplication.id == application_id).first()
-    if not app:
-        raise HTTPException(status_code=404, detail="Application not found")
+def update_application_status(
+    application_id: int,
+    status: str,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    app = _owned_application(db, application_id, profile)
     app.status = status
     db.commit()
     return {"id": application_id, "status": status}
 
 
 @router.post("/applications/tailor", response_model=list[JobApplicationResponse])
-async def tailor_documents(request: TailorDocumentsRequest, db: Session = Depends(get_db)):
+async def tailor_documents(
+    request: TailorDocumentsRequest,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
     generator = DocumentGenerator()
-    if not request.application_ids:
+    if request.application_ids:
+        # Restrict to applications the user actually owns.
+        owned = {
+            a.id
+            for a in db.query(JobApplication.id)
+            .filter(
+                JobApplication.id.in_(request.application_ids),
+                JobApplication.user_profile_id == profile.id,
+            )
+            .all()
+        }
+        application_ids = [i for i in request.application_ids if i in owned]
+    else:
         apps = (
             db.query(JobApplication)
-            .filter(JobApplication.status == "discovered")
+            .filter(
+                JobApplication.user_profile_id == profile.id,
+                JobApplication.status == "discovered",
+            )
             .limit(20)
             .all()
         )
-        request.application_ids = [a.id for a in apps]
+        application_ids = [a.id for a in apps]
 
-    results = await generator.tailor_batch(db, request.application_ids)
-    return results
+    try:
+        return await generator.tailor_batch(db, application_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 @router.post("/applications/{application_id}/tailor", response_model=JobApplicationResponse)
-async def tailor_single(application_id: int, db: Session = Depends(get_db)):
+async def tailor_single(
+    application_id: int,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    _owned_application(db, application_id, profile)
     generator = DocumentGenerator()
     try:
         return await generator.tailor_for_application(db, application_id)
@@ -202,32 +610,60 @@ async def tailor_single(application_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/applications/send-outreach", response_model=list[OutreachEmailResponse])
-async def send_outreach(request: SendOutreachRequest, db: Session = Depends(get_db)):
+async def send_outreach(
+    request: SendOutreachRequest,
+    user: User = Depends(get_current_user),
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    _owned_application(db, request.application_id, profile)
+
+    # A real outreach send (not a preview/test) counts as one manual application
+    # against the plan's daily cap.
+    is_real_send = not request.dry_run and not request.test_to_self
+    if is_real_send:
+        limits = effective_limits(user)
+        if get_usage(db, profile.id, "manual") >= limits.manual_per_day:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"You've reached your plan's daily limit of {limits.manual_per_day} "
+                    "manual applications. Upgrade your plan to apply to more jobs today."
+                ),
+            )
+
     service = EmailService()
     try:
-        return await service.send_outreach(
+        results = await service.send_outreach(
             db, request.application_id, request.dry_run, request.test_to_self
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    if is_real_send and any(r.status == "sent" for r in results):
+        incr_usage(db, profile.id, "manual", 1)
+        db.commit()
+    return results
+
 
 @router.get("/applications/{application_id}/emails", response_model=list[OutreachEmailResponse])
-def get_outreach_emails(application_id: int, db: Session = Depends(get_db)):
+def get_outreach_emails(
+    application_id: int,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    _owned_application(db, application_id, profile)
     return db.query(OutreachEmail).filter(OutreachEmail.application_id == application_id).all()
 
 
 @router.get("/applications/{application_id}/contacts", response_model=list[ContactResponse])
-async def find_application_contacts(application_id: int, db: Session = Depends(get_db)):
+async def find_application_contacts(
+    application_id: int,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
     """Look up outreach contacts (emails) for the job's company via Hunter.io."""
-    app = (
-        db.query(JobApplication)
-        .options(joinedload(JobApplication.job))
-        .filter(JobApplication.id == application_id)
-        .first()
-    )
-    if not app:
-        raise HTTPException(status_code=404, detail="Application not found")
+    app = _owned_application(db, application_id, profile, with_job=True)
     if not app.job:
         raise HTTPException(status_code=400, detail="Application has no associated job")
 
@@ -245,11 +681,12 @@ async def find_application_contacts(application_id: int, db: Session = Depends(g
 
 
 @router.post("/applications/follow-up")
-def schedule_follow_up(request: FollowUpRequest, db: Session = Depends(get_db)):
-    app = db.query(JobApplication).filter(JobApplication.id == request.application_id).first()
-    if not app:
-        raise HTTPException(status_code=404, detail="Application not found")
-
+def schedule_follow_up(
+    request: FollowUpRequest,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    app = _owned_application(db, request.application_id, profile)
     now = datetime.utcnow()
     app.last_follow_up_at = now
     app.next_follow_up_at = now + timedelta(days=request.schedule_next_days)
@@ -260,9 +697,133 @@ def schedule_follow_up(request: FollowUpRequest, db: Session = Depends(get_db)):
     return {"id": app.id, "next_follow_up_at": app.next_follow_up_at, "status": app.status}
 
 
+# --------------------------------------------------------------------------- #
+# Automation loops (plan-capped)
+# --------------------------------------------------------------------------- #
+def _owned_loop(db: Session, loop_id: int, profile: UserProfile) -> AutomationLoop:
+    loop = db.query(AutomationLoop).filter(AutomationLoop.id == loop_id).first()
+    if not loop or loop.user_profile_id != profile.id:
+        raise HTTPException(status_code=404, detail="Automation loop not found")
+    return loop
+
+
+def _active_loop_count(db: Session, profile_id: int) -> int:
+    return (
+        db.query(AutomationLoop)
+        .filter(
+            AutomationLoop.user_profile_id == profile_id,
+            AutomationLoop.enabled.is_(True),
+        )
+        .count()
+    )
+
+
+@router.get("/automation/loops", response_model=list[AutomationLoopResponse])
+def list_loops(
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    return (
+        db.query(AutomationLoop)
+        .filter(AutomationLoop.user_profile_id == profile.id)
+        .order_by(AutomationLoop.created_at.asc())
+        .all()
+    )
+
+
+@router.post("/automation/loops", response_model=AutomationLoopResponse)
+def create_loop(
+    data: AutomationLoopCreate,
+    user: User = Depends(get_current_user),
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    limits = effective_limits(user)
+    if not limits.can_automate:
+        raise HTTPException(
+            status_code=402,
+            detail="Your current plan does not include automation. Upgrade to set up automated loops.",
+        )
+    if data.enabled and _active_loop_count(db, profile.id) >= limits.max_loops:
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                f"Your plan allows up to {limits.max_loops} active automation loop(s). "
+                "Disable one or upgrade your plan."
+            ),
+        )
+    payload = data.model_dump()
+    # Clamp the per-loop daily cap to what the plan allows.
+    payload["daily_send_cap"] = min(payload.get("daily_send_cap", 5), limits.auto_per_loop_per_day)
+    loop = AutomationLoop(user_profile_id=profile.id, **payload)
+    db.add(loop)
+    db.commit()
+    db.refresh(loop)
+    return loop
+
+
+@router.patch("/automation/loops/{loop_id}", response_model=AutomationLoopResponse)
+def update_loop(
+    loop_id: int,
+    data: AutomationLoopUpdate,
+    user: User = Depends(get_current_user),
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    loop = _owned_loop(db, loop_id, profile)
+    limits = effective_limits(user)
+    payload = data.model_dump(exclude_unset=True)
+
+    # Enabling a loop must respect the plan's active-loop cap.
+    if payload.get("enabled") and not loop.enabled:
+        if not limits.can_automate:
+            raise HTTPException(status_code=402, detail="Your plan does not include automation.")
+        if _active_loop_count(db, profile.id) >= limits.max_loops:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Your plan allows up to {limits.max_loops} active automation loop(s).",
+            )
+    if "daily_send_cap" in payload:
+        payload["daily_send_cap"] = min(payload["daily_send_cap"], limits.auto_per_loop_per_day)
+    for key, value in payload.items():
+        setattr(loop, key, value)
+    db.commit()
+    db.refresh(loop)
+    return loop
+
+
+@router.delete("/automation/loops/{loop_id}")
+def delete_loop(
+    loop_id: int,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    loop = _owned_loop(db, loop_id, profile)
+    db.delete(loop)
+    db.commit()
+    return {"deleted": loop_id}
+
+
+@router.get("/automation/runs", response_model=list[AutomationRunResponse])
+def automation_runs(
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    return (
+        db.query(AutomationRun)
+        .filter(AutomationRun.user_profile_id == profile.id)
+        .order_by(AutomationRun.started_at.desc())
+        .limit(10)
+        .all()
+    )
+
+
 @router.get("/dashboard/stats")
-def dashboard_stats(profile_id: int, db: Session = Depends(get_db)):
-    apps = db.query(JobApplication).filter(JobApplication.user_profile_id == profile_id).all()
+def dashboard_stats(
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    apps = db.query(JobApplication).filter(JobApplication.user_profile_id == profile.id).all()
     return {
         "total": len(apps),
         "discovered": sum(1 for a in apps if a.status == "discovered"),

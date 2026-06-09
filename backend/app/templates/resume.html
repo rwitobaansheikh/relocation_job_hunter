@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    @page { size: letter; margin: 0.5in 0.55in; }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: "Times New Roman", "DejaVu Serif", Georgia, serif;
+      font-size: 10pt;
+      line-height: 1.22;
+      color: #000;
+      margin: 0;
+    }
+
+    a { color: #1a0dab; text-decoration: none; }
+
+    /* --- Header (name + contact line), centered like the LaTeX template --- */
+    .name {
+      text-align: center;
+      font-variant: small-caps;
+      font-size: 23pt;
+      font-weight: bold;
+      letter-spacing: 1px;
+      margin: 0 0 2pt 0;
+    }
+    .contact {
+      text-align: center;
+      font-size: 9.5pt;
+      margin: 0 0 4pt 0;
+      line-height: 1.35;
+    }
+    .contact .sep { padding: 0 4pt; color: #000; }
+
+    /* --- Section headers: small-caps + full-width rule underneath --- */
+    .section { margin-top: 7pt; }
+    .section-title {
+      font-variant: small-caps;
+      font-size: 12.5pt;
+      font-weight: normal;
+      letter-spacing: 0.5px;
+      margin: 0 0 3pt 0;
+      border-bottom: 0.7pt solid #000;
+      padding-bottom: 1pt;
+    }
+
+    .summary { margin: 2pt 0 0 0; text-align: justify; }
+
+    /* --- Two-column rows (flex, not floats — WeasyPrint collapses floats) --- */
+    .row {
+      display: flex;
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: baseline;
+      width: 100%;
+      gap: 10pt;
+      margin: 0;
+    }
+    .row .left {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding-right: 6pt;
+    }
+    .row .right {
+      flex: 0 0 auto;
+      max-width: 42%;
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    /* --- Experience / education entries --- */
+    .entry {
+      margin: 4pt 0 0 0;
+      page-break-inside: avoid;
+    }
+    .entry-title { font-weight: bold; }
+    .entry-sub { font-style: italic; font-size: 9.5pt; }
+    .entry-meta { font-style: italic; font-size: 9.5pt; }
+
+    ul.bullets {
+      margin: 2pt 0 0 0;
+      padding-left: 16pt;
+      list-style-position: outside;
+    }
+    ul.bullets li {
+      margin: 1pt 0;
+      padding-left: 2pt;
+    }
+
+    /* --- Projects --- */
+    .proj {
+      margin: 4pt 0 0 0;
+      page-break-inside: avoid;
+    }
+    .proj-name { font-weight: bold; }
+    .proj-tech { font-style: italic; }
+    .proj-links { font-size: 9.5pt; margin-top: 1pt; }
+
+    /* --- Skills --- */
+    .skills { margin: 2pt 0 0 0; }
+    .skills .row-line { margin: 1pt 0; }
+    .skills .label { font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="name">{{ name }}</div>
+  <div class="contact">
+    {%- set parts = [] -%}
+    {%- if contact.phone %}{% set _ = parts.append(contact.phone) %}{% endif -%}
+    {%- for i in range(contact_links|length) -%}
+      {%- set _ = parts.append(contact_links[i]) -%}
+    {%- endfor -%}
+    {%- for part in parts -%}
+      {{ part|safe }}{% if not loop.last %}<span class="sep">|</span>{% endif %}
+    {%- endfor -%}
+  </div>
+
+  {% for section in sections %}
+  <div class="section">
+    <div class="section-title">{{ section.title }}</div>
+
+    {% if section.type == "summary" %}
+      <div class="summary">{{ section.text }}</div>
+
+    {% elif section.type in ["experience", "education"] %}
+      {% for item in section["items"] %}
+      <div class="entry">
+        <div class="row">
+          <div class="left entry-title">{{ item.heading }}</div>
+          {% if item.date %}<div class="right entry-meta">{{ item.date }}</div>{% endif %}
+        </div>
+        {% if item.subheading or item.location %}
+        <div class="row">
+          <div class="left entry-sub">{{ item.subheading }}</div>
+          {% if item.location %}<div class="right entry-meta">{{ item.location }}</div>{% endif %}
+        </div>
+        {% endif %}
+        {% if item.bullets %}
+        <ul class="bullets">
+          {% for b in item.bullets %}<li>{{ b }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endfor %}
+
+    {% elif section.type == "projects" %}
+      {% for item in section["items"] %}
+      <div class="proj">
+        <div class="row">
+          <div class="left">
+            <span class="proj-name">{{ item.heading }}</span>{% if item.tech %} <span class="proj-tech">| {{ item.tech }}</span>{% endif %}
+          </div>
+          {% if item.date %}<div class="right entry-meta">{{ item.date }}</div>{% endif %}
+        </div>
+        {% if item.bullets %}
+        <ul class="bullets">
+          {% for b in item.bullets %}<li>{{ b }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% if item.links %}
+        <div class="proj-links">
+          {% for link in item.links %}<a href="{{ link.url }}">{{ link.label }}</a>{% if not loop.last %} | {% endif %}{% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+
+    {% elif section.type == "skills" %}
+      <div class="skills">
+        {% for group in section.groups %}
+        <div class="row-line"><span class="label">{{ group.label }}</span>: {{ group.value }}</div>
+        {% endfor %}
+      </div>
+
+    {% endif %}
+  </div>
+  {% endfor %}
+</body>
+</html>

@@ -8,6 +8,8 @@ from typing import Optional
 import httpx
 
 from app.config import settings
+from app.security import decrypt_secret
+from app.services import rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +17,18 @@ GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 # Transient statuses worth retrying: rate limit (429) and server errors (5xx).
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
-_MAX_ATTEMPTS = 4
-_BASE_DELAY_SECONDS = 2.0
+_MAX_ATTEMPTS = 8
+_BASE_DELAY_SECONDS = 3.0
+_MAX_DELAY_SECONDS = 45.0
+
+
+def resolve_gemini_api_key(profile=None) -> str:
+    """Shared app key from .env, or the user's encrypted override from Settings."""
+    if profile is not None:
+        override = decrypt_secret(getattr(profile, "gemini_api_key_enc", "") or "")
+        if override:
+            return override.strip()
+    return (settings.gemini_api_key or "").strip()
 
 
 def _retry_delay(attempt: int, response: Optional[httpx.Response]) -> float:
@@ -28,8 +40,9 @@ def _retry_delay(attempt: int, response: Optional[httpx.Response]) -> float:
                 return float(retry_after)
             except ValueError:
                 pass
-    # Exponential backoff with jitter: ~2s, 4s, 8s ...
-    return _BASE_DELAY_SECONDS * (2 ** attempt) + random.uniform(0, 1)
+    # Exponential backoff with jitter, capped so we don't wait forever.
+    delay = _BASE_DELAY_SECONDS * (2 ** attempt) + random.uniform(0, 1.5)
+    return min(delay, _MAX_DELAY_SECONDS)
 
 
 async def gemini_generate(
@@ -38,6 +51,7 @@ async def gemini_generate(
     temperature: float = 0.7,
     max_tokens: int = 4096,
     disable_thinking: bool = True,
+    api_key: Optional[str] = None,
 ) -> str:
     """Call Gemini's generateContent endpoint and return the text, or '' on
     failure / when no API key is configured.
@@ -51,7 +65,8 @@ async def gemini_generate(
     and return an empty/truncated body (producing blank documents). These are
     straightforward writing tasks that don't need reasoning tokens.
     """
-    if not settings.gemini_api_key:
+    key = (api_key or settings.gemini_api_key or "").strip()
+    if not key:
         logger.warning("Gemini API key not configured; returning empty text")
         return ""
 
@@ -68,10 +83,10 @@ async def gemini_generate(
 
     for attempt in range(_MAX_ATTEMPTS):
         try:
+            # Global pace across all users (shared key) before each call.
+            await rate_limiter.acquire("llm")
             async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(
-                    url, params={"key": settings.gemini_api_key}, json=payload
-                )
+                response = await client.post(url, params={"key": key}, json=payload)
 
             if response.status_code in _RETRYABLE_STATUS and attempt < _MAX_ATTEMPTS - 1:
                 delay = _retry_delay(attempt, response)

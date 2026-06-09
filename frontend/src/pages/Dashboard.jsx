@@ -6,10 +6,12 @@ import { useProfile } from '../ProfileContext'
 export default function Dashboard() {
   const { profile, loading } = useProfile()
   const [stats, setStats] = useState(null)
+  const [billing, setBilling] = useState(null)
 
   useEffect(() => {
     if (profile?.id) {
-      api.getDashboardStats(profile.id).then(setStats).catch(console.error)
+      api.getDashboardStats().then(setStats).catch(console.error)
+      api.getBilling().then(setBilling).catch(console.error)
     }
   }, [profile])
 
@@ -18,9 +20,9 @@ export default function Dashboard() {
   if (!profile) {
     return (
       <div className="empty-state">
-        <h2 className="page-title">Welcome to Relocation Job Hunter</h2>
-        <p className="page-subtitle">Create your profile to get started</p>
-        <Link to="/profile"><button className="btn-primary">Set Up Profile</button></Link>
+        <h2 className="page-title">Welcome to Job Application Flow</h2>
+        <p className="page-subtitle">Complete your profile to get started</p>
+        <Link to="/app/profile"><button className="btn-primary">Set Up Profile</button></Link>
       </div>
     )
   }
@@ -45,9 +47,9 @@ export default function Dashboard() {
         <div className="card">
           <h3 style={{ marginBottom: '0.8rem' }}>Quick Actions</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <Link to="/jobs"><button className="btn-primary" style={{ width: '100%' }}>Search New Jobs</button></Link>
-            <Link to="/applications"><button className="btn-secondary" style={{ width: '100%' }}>View Applications</button></Link>
-            <Link to="/profile"><button className="btn-secondary" style={{ width: '100%' }}>Update Profile</button></Link>
+            <Link to="/app/jobs"><button className="btn-primary" style={{ width: '100%' }}>Search New Jobs</button></Link>
+            <Link to="/app/applications"><button className="btn-secondary" style={{ width: '100%' }}>View Applications</button></Link>
+            <Link to="/app/profile"><button className="btn-secondary" style={{ width: '100%' }}>Update Profile</button></Link>
           </div>
         </div>
         <div className="card">
@@ -60,6 +62,22 @@ export default function Dashboard() {
           </p>
         </div>
       </div>
+
+      {billing && (
+        <div className="card" style={{ marginTop: '1.5rem' }}>
+          <h3 style={{ marginBottom: '0.8rem' }}>Plan & Automation</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.6rem' }}>
+            <span className="badge badge-applied" style={{ textTransform: 'capitalize' }}>{billing.plan}</span>
+            {billing.plan === 'trial' && <span className="muted">{billing.trial_days_left} day(s) of trial left</span>}
+            <Link to="/app/automation" style={{ fontSize: '0.85rem' }}>Manage loops →</Link>
+            <Link to="/app/billing" style={{ fontSize: '0.85rem' }}>Plan & Billing →</Link>
+          </div>
+          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+            {billing.usage.loops_active} / {billing.limits.max_loops} automation loops active ·
+            {' '}{billing.usage.manual_today} / {billing.limits.manual_per_day} manual applications today
+          </p>
+        </div>
+      )}
     </div>
   )
 }

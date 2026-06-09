@@ -9,6 +9,7 @@ from app.services.scraper.base import (
     GLOBAL_LOCATION_SIGNALS,
     JUNIOR_KEYWORDS,
     RELOCATION_KEYWORDS,
+    SENIORITY_KEYWORDS,
     US_LOCATION_SIGNALS,
     RawJob,
 )
@@ -16,6 +17,22 @@ from app.services.scraper.base import (
 
 def _split_csv(value: str) -> list[str]:
     return [v.strip().lower() for v in (value or "").split(",") if v.strip()]
+
+
+def _has_word(words: list[str], text: str) -> bool:
+    return any(re.search(r"\b" + re.escape(w) + r"\b", text) for w in words)
+
+
+# Seniority ordering used to enforce "not higher than selected" filters.
+_LEVEL_RANK: dict[str, int] = {
+    "intern": 0,
+    "entry": 1,
+    "mid": 2,
+    "senior": 3,
+    "executive": 4,
+}
+
+_LEVEL_KEYWORDS: dict[str, list[str]] = dict(SENIORITY_KEYWORDS)
 
 
 class JobMatcher:
@@ -77,10 +94,90 @@ class JobMatcher:
 
         return "unspecified"
 
+    def classify_seniority(self, job: RawJob) -> str:
+        """Classify a role into one of intern/entry/mid/senior/executive, or
+        'unspecified' when no clear signal exists. The title is weighted first
+        (more reliable), then the full text. 'unspecified' jobs are allowed
+        through the seniority filter since boards rarely tag levels."""
+        title = job.title.lower()
+        for level, words in SENIORITY_KEYWORDS:
+            if _has_word(words, title):
+                return level
+        text = " ".join([job.title, job.description, " ".join(job.tags)]).lower()
+        for level, words in SENIORITY_KEYWORDS:
+            if _has_word(words, text):
+                return level
+        return "unspecified"
+
+    def _job_text(self, job: RawJob) -> str:
+        return " ".join([job.title, job.description, " ".join(job.tags)]).lower()
+
+    def _signals_levels(self, job: RawJob, level_names: list[str]) -> bool:
+        text = self._job_text(job)
+        title = job.title.lower()
+        for name in level_names:
+            words = _LEVEL_KEYWORDS.get(name, [])
+            if _has_word(words, title) or _has_word(words, text):
+                return True
+        return False
+
+    def matches_seniority(self, job: RawJob, levels: list[str]) -> bool:
+        """True when the job fits the requested seniority band.
+
+        When the user picks Internship / Entry only, mid/senior/executive roles
+        are excluded. Untagged listings only pass if they show signals within the
+        selected band and do not signal a higher level."""
+        if not levels:
+            return True
+
+        classified = self.classify_seniority(job)
+        allowed = {lvl for lvl in levels if lvl in _LEVEL_RANK}
+        if not allowed:
+            return True
+
+        max_rank = max(_LEVEL_RANK[lvl] for lvl in allowed)
+
+        if classified != "unspecified":
+            return classified in allowed
+
+        # Untagged role: reject clear signals above the user's ceiling.
+        higher_levels = [lvl for lvl, rank in _LEVEL_RANK.items() if rank > max_rank]
+        if self._signals_levels(job, higher_levels):
+            return False
+
+        # Early-career filters (intern/entry): require a matching early signal.
+        if max_rank <= _LEVEL_RANK["entry"]:
+            early_levels = [lvl for lvl in allowed if _LEVEL_RANK[lvl] <= _LEVEL_RANK["entry"]]
+            return self._signals_levels(job, early_levels)
+
+        # Mid-level and above: allow untagged unless we already ruled out higher.
+        return True
+
+    def matches_salary(self, job: RawJob, min_salary, max_salary) -> bool:
+        """Best-effort salary gate. Jobs with no detectable salary always pass
+        (most listings omit it). Only excludes when a detected figure clearly
+        falls outside the requested band."""
+        if not min_salary and not max_salary:
+            return True
+        smin = getattr(job, "salary_min", None)
+        smax = getattr(job, "salary_max", None)
+        if smin is None and smax is None:
+            return True
+        if min_salary and smax is not None and smax < min_salary:
+            return False
+        if max_salary and smin is not None and smin > max_salary:
+            return False
+        return True
+
     def matches_target_role(self, job: RawJob, profile: UserProfile) -> bool:
         """True if the job matches one of the profile's target roles. When no
         target roles are set, all roles are allowed."""
-        roles = _split_csv(profile.target_roles)
+        return self.matches_roles(job, _split_csv(profile.target_roles))
+
+    def matches_roles(self, job: RawJob, roles: list[str]) -> bool:
+        """Core role matcher (also used by per-role automation loops). Empty
+        `roles` allows all."""
+        roles = [r.strip().lower() for r in (roles or []) if r and r.strip()]
         if not roles:
             return True
 
@@ -99,12 +196,16 @@ class JobMatcher:
         alias), OR is an open remote/global role. US-based and excluded-company
         jobs are removed separately via `is_excluded`. When no target countries
         are set, all (non-excluded) locations are allowed."""
-        text = " ".join([job.location, job.description, " ".join(job.tags)]).lower()
+        return self.matches_locations(job, _split_csv(profile.target_countries))
 
-        countries = _split_csv(profile.target_countries)
+    def matches_locations(self, job: RawJob, locations: list[str]) -> bool:
+        """Core location matcher used for both profile target countries and an
+        explicit per-search location filter. Empty `locations` allows all."""
+        countries = [loc.strip().lower() for loc in (locations or []) if loc and loc.strip()]
         if not countries:
             return True
 
+        text = " ".join([job.location, job.description, " ".join(job.tags)]).lower()
         for country in countries:
             if country in text:
                 return True
@@ -113,7 +214,7 @@ class JobMatcher:
                     return True
 
         # Keep remote/global roles available even if they don't name a target
-        # country (US ones are already filtered out by `is_excluded`).
+        # location (US ones are already filtered out by `is_excluded`).
         return any(signal in text for signal in GLOBAL_LOCATION_SIGNALS)
 
     def is_excluded(self, job: RawJob) -> tuple[bool, str]:
