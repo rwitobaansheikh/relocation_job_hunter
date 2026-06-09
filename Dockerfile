@@ -9,7 +9,10 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---- Stage 2: Python backend that also serves the built frontend ----
-FROM python:3.12-slim AS backend
+# Python 3.11 has prebuilt wheels for reportlab 3.6.x (pinned via xhtml2pdf
+# <4). The native libs below let reportlab's _renderPM compile from source as
+# a fallback (needs FreeType/JPEG/zlib headers) if a wheel isn't available.
+FROM python:3.11-slim AS backend
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -19,6 +22,13 @@ ENV PYTHONUNBUFFERED=1 \
     GENERATED_DIR=/data/generated
 
 WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        libfreetype6-dev \
+        libjpeg-dev \
+        zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
