@@ -105,6 +105,78 @@ Open http://localhost:5173 in your browser.
 
 See `.env.example` for all configuration options.
 
+## Deployment (AWS + GitHub Actions)
+
+The app ships as a **single Docker image** (FastAPI backend that also serves the
+built React frontend on the same origin) running on **one EC2 instance** via
+Docker Compose. SQLite and uploaded/generated files persist on the instance's
+`/data` directory. CI/CD builds the image, pushes it to **ECR**, and deploys
+over SSH.
+
+```
+GitHub push ──► GitHub Actions ──► build image ──► push to ECR
+                                          │
+                                          └─► SSH to EC2 ─► docker compose pull && up
+EC2 (Docker): app container :80 ─► uvicorn :8000  (+ /data volume: SQLite, uploads, generated)
+```
+
+### Files
+
+| Path | Purpose |
+|------|---------|
+| `Dockerfile` | Multi-stage build: Vite frontend → Python backend serving it |
+| `docker-compose.yml` | Runs the image on the instance (port 80, `/data` volume) |
+| `.env.production.example` | Template for the instance env (becomes the `APP_ENV` secret) |
+| `infra/terraform/` | Provisions ECR, EC2, Elastic IP, security group, IAM, GitHub OIDC role |
+| `.github/workflows/deploy.yml` | Build → push to ECR → SSH deploy |
+
+### 1. Provision infrastructure (Terraform)
+
+```bash
+cd infra/terraform
+cp terraform.tfvars.example terraform.tfvars   # fill in github_repo + ssh_public_key
+terraform init
+terraform apply
+```
+
+Note the outputs — you'll need them for the GitHub secrets below:
+`ecr_repository_url`, `instance_public_ip`, `github_actions_role_arn`, `app_url`.
+
+> Tip: lock SSH down by setting `allowed_ssh_cidr` to `<your-ip>/32`.
+
+### 2. Configure GitHub repository secrets
+
+| Secret | Value |
+|--------|-------|
+| `AWS_REGION` | e.g. `eu-west-2` |
+| `AWS_DEPLOY_ROLE_ARN` | Terraform output `github_actions_role_arn` |
+| `ECR_REPOSITORY` | The repo **name** (e.g. `relocation-job-hunter`) |
+| `EC2_HOST` | Terraform output `instance_public_ip` |
+| `EC2_USER` | `ec2-user` |
+| `EC2_SSH_KEY` | The **private** key matching `ssh_public_key` |
+| `APP_ENV` | Full contents of a filled-in `.env.production.example` (Gemini/Hunter/SMTP keys, etc.) |
+
+### 3. Deploy
+
+Push to `main` (or run the **Build & Deploy** workflow manually). The pipeline
+builds and pushes the image, copies `docker-compose.yml` + a generated `.env`
+to `/opt/app`, then runs `docker compose pull && up -d`.
+
+Once finished, open the `app_url` output (`http://<elastic-ip>`).
+
+### Notes
+
+- **Single worker on purpose**: SQLite and local-file storage aren't safe across
+  multiple worker processes, so the container runs one uvicorn worker. Fine for a
+  single-user tool.
+- **Backups**: everything stateful lives under `/data` on the instance — snapshot
+  the EBS volume or `scp` `/data` to back up.
+- **HTTPS/domain (later)**: port 443 is already open in the security group. To add
+  TLS, put Caddy or nginx + Let's Encrypt in front (or an ALB + ACM cert) and add
+  your domain to `CORS_ORIGINS`.
+- **Rate limits**: tailoring + per-contact email generation make several Gemini
+  calls; on the free tier you may hit `429`. Consider enabling billing for steady use.
+
 ## License
 
 MIT

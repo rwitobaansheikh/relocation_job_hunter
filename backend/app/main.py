@@ -2,8 +2,10 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
@@ -31,7 +33,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,3 +45,32 @@ app.include_router(router)
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# Serve the built React frontend (if present) from the same origin as the API.
+# In production the Docker image copies the Vite build into settings.static_dir;
+# in local dev this directory won't exist and the Vite dev server is used instead.
+_static_dir = Path(settings.static_dir)
+if _static_dir.is_dir():
+    _assets_dir = _static_dir / "assets"
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+
+    _index_file = _static_dir / "index.html"
+
+    @app.get("/", include_in_schema=False)
+    async def _serve_index():
+        return FileResponse(_index_file)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def _serve_spa(full_path: str):
+        # Let unmatched API/health calls 404 as JSON instead of returning the SPA.
+        if full_path.startswith(("api/", "api", "health")):
+            raise HTTPException(status_code=404, detail="Not found")
+        candidate = _static_dir / full_path
+        if candidate.is_file():
+            return FileResponse(candidate)
+        # Unknown client-side route -> let React Router handle it.
+        return FileResponse(_index_file)
+else:
+    logger.info("Static dir %s not found; serving API only (dev mode)", _static_dir)

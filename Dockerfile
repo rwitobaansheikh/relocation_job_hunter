@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1
+
+# ---- Stage 1: build the React/Vite frontend ----
+FROM node:20-alpine AS frontend
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ---- Stage 2: Python backend that also serves the built frontend ----
+FROM python:3.12-slim AS backend
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    STATIC_DIR=/app/static \
+    DATABASE_URL=sqlite:////data/job_hunter.db \
+    UPLOADS_DIR=/data/uploads \
+    GENERATED_DIR=/data/generated
+
+WORKDIR /app
+
+COPY backend/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend/ ./
+
+# Built static assets from the frontend stage.
+COPY --from=frontend /frontend/dist ./static
+
+# Persistent data (SQLite DB, uploads, generated PDFs) lives on a mounted volume.
+RUN mkdir -p /data/uploads /data/generated
+
+EXPOSE 8000
+
+# Single worker on purpose: SQLite + local-file storage are not safe to share
+# across multiple worker processes.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

@@ -40,3 +40,14 @@ frontend/.vite/
 # OS
 .DS_Store
 Thumbs.db
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/*.tfvars
+infra/terraform/.terraform.lock.hcl
+crash.log
+
+# Production env
+.env.production

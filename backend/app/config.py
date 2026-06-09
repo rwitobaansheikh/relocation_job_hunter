@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     job_age_hours: int = 48
     uploads_dir: str = "uploads"
     generated_dir: str = "generated"
+    static_dir: str = "static"
+    cors_origins: str = "http://localhost:5173,http://localhost:3000"
 
 
 settings = Settings()

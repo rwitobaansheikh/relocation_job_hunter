@@ -1,0 +1,20 @@
+# Production compose file deployed to the EC2 instance at /opt/app.
+# ECR_IMAGE and all app secrets are provided via the adjacent .env file
+# (written by the GitHub Actions deploy job from the APP_ENV secret).
+services:
+  app:
+    image: ${ECR_IMAGE}
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "80:8000"
+    volumes:
+      # Persist SQLite DB + uploaded/generated files on the host EBS volume.
+      - /data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

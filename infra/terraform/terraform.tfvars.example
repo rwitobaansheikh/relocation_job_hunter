@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars and fill in. Do not commit terraform.tfvars.
+
+aws_region  = "eu-west-2"
+github_repo = "your-github-username/relocation_job_hunter"
+
+# Paste the contents of your SSH public key (e.g. ~/.ssh/id_ed25519.pub).
+ssh_public_key = "ssh-ed25519 AAAA... you@host"
+
+# Strongly recommended: lock SSH to your own IP.
+# allowed_ssh_cidr = "203.0.113.4/32"
+
+# Set true only if a GitHub OIDC provider already exists in this AWS account.
+# github_oidc_provider_exists = false
