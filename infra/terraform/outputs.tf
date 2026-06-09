@@ -14,8 +14,13 @@ output "instance_public_ip" {
 }
 
 output "instance_id" {
-  description = "EC2 instance ID. Set as the EC2_INSTANCE_ID GitHub secret (SSM deploy)."
+  description = "EC2 instance ID (optional; for SSM troubleshooting)."
   value       = aws_instance.app.id
+}
+
+output "security_group_id" {
+  description = "App security group ID (used by CI for ephemeral SSH during deploy)."
+  value       = aws_security_group.app.id
 }
 
 output "github_actions_role_arn" {

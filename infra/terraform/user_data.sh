@@ -3,7 +3,8 @@ set -euxo pipefail
 
 # Install Docker + Compose plugin on Amazon Linux 2023.
 dnf update -y
-dnf install -y docker
+dnf install -y docker amazon-ssm-agent
+systemctl enable --now amazon-ssm-agent
 systemctl enable --now docker
 usermod -aG docker ec2-user
 
