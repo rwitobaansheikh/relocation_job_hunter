@@ -13,6 +13,11 @@ output "instance_public_ip" {
   value       = aws_eip.app.public_ip
 }
 
+output "instance_id" {
+  description = "EC2 instance ID. Set as the EC2_INSTANCE_ID GitHub secret (SSM deploy)."
+  value       = aws_instance.app.id
+}
+
 output "github_actions_role_arn" {
   description = "IAM role ARN for GitHub Actions OIDC. Set as the AWS_DEPLOY_ROLE_ARN GitHub secret."
   value       = aws_iam_role.github_actions.arn

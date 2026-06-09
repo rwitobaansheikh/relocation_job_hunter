@@ -259,3 +259,34 @@ resource "aws_iam_role_policy" "github_actions_ecr" {
     ]
   })
 }
+
+# Let GitHub Actions deploy over SSM (no inbound SSH from CI runners required).
+resource "aws_iam_role_policy" "github_actions_ssm" {
+  name = "${local.name}-gha-ssm"
+  role = aws_iam_role.github_actions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "SsmSendCommand"
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand",
+          "ssm:GetCommandInvocation",
+          "ssm:ListCommandInvocations",
+        ]
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript",
+          "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/${aws_instance.app.id}",
+        ]
+      },
+      {
+        Sid      = "SsmDescribe"
+        Effect   = "Allow"
+        Action   = ["ssm:DescribeInstanceInformation"]
+        Resource = "*"
+      },
+    ]
+  })
+}
