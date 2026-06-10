@@ -113,8 +113,10 @@ jobs:
             docker compose $COMPOSE pull
             docker compose $COMPOSE up -d --remove-orphans
             docker image prune -f
-            if ! docker compose exec -T ollama ollama list 2>/dev/null | grep -q 'llama3.2:1b'; then
-              docker compose exec -T ollama ollama pull llama3.2:1b
+            if grep -qE '^LLM_PROVIDER=ollama' .env; then
+              if ! docker compose exec -T ollama ollama list 2>/dev/null | grep -q 'llama3.2:1b'; then
+                docker compose exec -T ollama ollama pull llama3.2:1b
+              fi
             fi
 
       - name: Close ephemeral SSH
