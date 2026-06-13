@@ -1,19 +1,19 @@
-name: Build & Deploy (Production)
+name: Build & Deploy (Development)
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
     paths:
       - "backend/**"
       - "frontend/**"
       - "Dockerfile"
       - "docker-compose.yml"
-      - "docker-compose.cloudflared.yml"
-      - ".github/workflows/deploy.yml"
+      - "docker-compose.dev.yml"
+      - ".github/workflows/deploy-dev.yml"
   workflow_dispatch:
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-dev
   cancel-in-progress: true
 
 env:
@@ -21,7 +21,7 @@ env:
   ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
 
 permissions:
-  id-token: write   # required for AWS OIDC
+  id-token: write
   contents: read
 
 jobs:
@@ -47,19 +47,19 @@ jobs:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
           IMAGE="$REGISTRY/$ECR_REPOSITORY"
-          docker build -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
-          docker push "$IMAGE:${{ github.sha }}"
-          docker push "$IMAGE:latest"
-          echo "image=$IMAGE:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          docker build -t "$IMAGE:dev-${{ github.sha }}" -t "$IMAGE:dev-latest" .
+          docker push "$IMAGE:dev-${{ github.sha }}"
+          docker push "$IMAGE:dev-latest"
+          echo "image=$IMAGE:dev-${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
       - name: Prepare deployment files
         env:
-          APP_ENV: ${{ secrets.APP_ENV }}
+          APP_ENV: ${{ secrets.APP_ENV_DEV }}
           IMAGE: ${{ steps.image.outputs.image }}
         run: |
           mkdir -p deploy_bundle
           cp docker-compose.yml deploy_bundle/docker-compose.yml
-          cp docker-compose.cloudflared.yml deploy_bundle/docker-compose.cloudflared.yml
+          cp docker-compose.dev.yml deploy_bundle/docker-compose.dev.yml
           printf '%s\n' "$APP_ENV" > deploy_bundle/.env
           echo "ECR_IMAGE=$IMAGE" >> deploy_bundle/.env
 
@@ -70,14 +70,12 @@ jobs:
           RUNNER_IP=$(curl -fsS https://checkip.amazonaws.com | tr -d '[:space:]')
           SG_ID="${{ secrets.EC2_SECURITY_GROUP_ID }}"
           if [[ -z "$SG_ID" ]]; then
-            echo "Missing GitHub secret EC2_SECURITY_GROUP_ID (terraform output security_group_id)."
+            echo "Missing GitHub secret EC2_SECURITY_GROUP_ID."
             exit 1
           fi
-          echo "Runner IP: $RUNNER_IP"
-          echo "Security group: $SG_ID"
           aws ec2 authorize-security-group-ingress \
             --group-id "$SG_ID" \
-            --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=${RUNNER_IP}/32,Description=github-actions-${{ github.run_id }}}]" \
+            --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=${RUNNER_IP}/32,Description=github-actions-dev-${{ github.run_id }}}]" \
             || true
           echo "runner_ip=$RUNNER_IP" >> "$GITHUB_OUTPUT"
           echo "sg_id=$SG_ID" >> "$GITHUB_OUTPUT"
@@ -89,8 +87,8 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "deploy_bundle/docker-compose.yml,deploy_bundle/docker-compose.cloudflared.yml,deploy_bundle/.env"
-          target: "/opt/app"
+          source: "deploy_bundle/docker-compose.yml,deploy_bundle/docker-compose.dev.yml,deploy_bundle/.env"
+          target: "/opt/app-dev"
           strip_components: 1
           timeout: 60s
 
@@ -103,13 +101,12 @@ jobs:
           command_timeout: 15m
           script: |
             set -euo pipefail
-            cd /opt/app
+            sudo mkdir -p /opt/app-dev /data-dev/uploads /data-dev/generated
+            sudo chown -R ec2-user:ec2-user /opt/app-dev /data-dev
+            cd /opt/app-dev
             aws ecr get-login-password --region ${{ env.AWS_REGION }} \
               | docker login --username AWS --password-stdin "$(echo "${{ steps.image.outputs.image }}" | cut -d'/' -f1)"
-            COMPOSE="-f docker-compose.yml"
-            if grep -qE '^CLOUDFLARE_TUNNEL_TOKEN=.+$' .env; then
-              COMPOSE="$COMPOSE -f docker-compose.cloudflared.yml"
-            fi
+            COMPOSE="-p app-dev -f docker-compose.yml -f docker-compose.dev.yml"
             if grep -qE '^LLM_PROVIDER=ollama' .env; then
               COMPOSE="$COMPOSE --profile ollama"
             fi
@@ -117,8 +114,8 @@ jobs:
             docker compose $COMPOSE up -d --remove-orphans
             docker image prune -f
             if grep -qE '^LLM_PROVIDER=ollama' .env; then
-              if ! docker compose exec -T ollama ollama list 2>/dev/null | grep -q 'llama3.2:1b'; then
-                docker compose exec -T ollama ollama pull llama3.2:1b
+              if ! docker compose $COMPOSE exec -T ollama ollama list 2>/dev/null | grep -q 'llama3.2:1b'; then
+                docker compose $COMPOSE exec -T ollama ollama pull llama3.2:1b
               fi
             fi
 

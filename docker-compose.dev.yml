@@ -1,0 +1,9 @@
+# Dev stack overlay — deployed to /opt/app-dev on the EC2 host.
+# Listens on port 8080 with a separate SQLite DB and file storage under /data-dev.
+# Add a Cloudflare Tunnel route: dev.jobapplicationflow.com -> http://127.0.0.1:8080
+services:
+  app:
+    ports:
+      - "8080:8000"
+    volumes:
+      - /data-dev:/data

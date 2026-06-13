@@ -183,6 +183,7 @@ Note the outputs — you'll need them for the GitHub secrets below:
 | `EC2_USER` | `ec2-user` |
 | `EC2_SSH_KEY` | The **private** key matching `ssh_public_key` |
 | `APP_ENV` | Full contents of a filled-in `.env.production.example` (Gemini/Hunter/SMTP keys, plus the now-required `JWT_SECRET` and `ENCRYPTION_KEY`) |
+| `APP_ENV_DEV` | Full contents of `.env.development` for the `dev` branch deploy |
 
 ### 3. Deploy
 
@@ -191,6 +192,46 @@ builds and pushes the image, copies `docker-compose.yml` + a generated `.env`
 to `/opt/app`, then runs `docker compose pull && up -d`.
 
 Once finished, open the `app_url` output (`http://<elastic-ip>`).
+
+### Development server (`dev` branch)
+
+Staging runs on the **same EC2 host** as production (no extra server cost):
+
+| | Production (`main`) | Development (`dev`) |
+|--|---------------------|---------------------|
+| Branch | `main` | `dev` |
+| Deploy workflow | Build & Deploy (Production) | Build & Deploy (Development) |
+| Path on EC2 | `/opt/app` | `/opt/app-dev` |
+| Port | 80 | 8080 |
+| URL | `https://jobapplicationflow.com` | `https://dev.jobapplicationflow.com` |
+| Data | `/data` | `/data-dev` (separate DB & files) |
+| ECR tags | `:latest`, `:sha` | `:dev-latest`, `:dev-sha` |
+| GitHub secret | `APP_ENV` | `APP_ENV_DEV` |
+| Stripe | Live keys | **Test** keys only |
+
+**Workflow:** develop on `dev` → auto-deploy to dev → verify → merge `dev` → `main` → production deploy.
+
+#### One-time setup
+
+1. **Cloudflare Tunnel** — add a public hostname route:
+   - `dev.jobapplicationflow.com` → `http://127.0.0.1:8080`
+2. **GitHub secret** — copy `.env.development.example` to `.env.development`, fill values,
+   run `bash scripts/validate-dev-env.sh`, paste into **`APP_ENV_DEV`**.
+3. **Stripe test webhook** (optional) — `https://dev.jobapplicationflow.com/api/webhooks/stripe`
+4. **Create and push the `dev` branch:**
+   ```bash
+   git checkout -b dev
+   git push -u origin dev
+   ```
+5. **Branch protection (recommended)** — GitHub → Settings → Branches → protect `main`:
+   require PR from `dev`, require status checks, disallow direct pushes.
+
+#### Deploy commands
+
+- **Dev:** push to `dev` (or run *Build & Deploy (Development)* manually)
+- **Prod:** merge to `main` (or run *Build & Deploy (Production)* manually)
+
+Dev and prod containers are isolated (`docker compose -p app-dev` vs default project).
 
 ### Notes
 

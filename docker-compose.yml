@@ -23,6 +23,7 @@ services:
   # GPU-backed EC2 instance or scale to a dedicated GPU service; set
   # OLLAMA_BASE_URL=http://ollama:11434 in .env (default below).
   ollama:
+    profiles: ["ollama"]
     image: ollama/ollama:latest
     restart: unless-stopped
     volumes:

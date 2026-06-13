@@ -51,3 +51,4 @@ crash.log
 
 # Production env
 .env.production
+.env.development
