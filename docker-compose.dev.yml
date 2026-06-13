@@ -3,7 +3,7 @@
 # Add a Cloudflare Tunnel route: dev.jobapplicationflow.com -> http://127.0.0.1:8080
 services:
   app:
-    ports:
+    ports: !override
       - "8080:8000"
-    volumes:
+    volumes: !override
       - /data-dev:/data
