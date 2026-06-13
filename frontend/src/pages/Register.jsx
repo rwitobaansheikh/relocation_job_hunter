@@ -38,9 +38,10 @@ export default function Register() {
         {theme === 'dark' ? '☀ Light mode' : '☾ Dark mode'}
       </button>
       <div className="auth-card card">
-        <div style={{ textAlign: 'center', marginBottom: '1.5rem', display: 'flex', justifyContent: 'center' }}>
-          <div style={{ background: 'white', padding: '8px 16px', borderRadius: '12px', display: 'inline-flex', alignItems: 'center' }}>
-            <img src="/logo-full.png" alt="Job Application Flow" style={{ height: '36px', objectFit: 'contain' }} />
+        <div style={{ textAlign: 'center', marginBottom: '2rem', display: 'flex', justifyContent: 'center' }}>
+          <div className="brand-logo" style={{ fontSize: '1.75rem' }}>
+            <img src="/logo-small.png" alt="Logo" />
+            <span className="text-main">jobapplication</span><span className="text-accent">flow</span>
           </div>
         </div>
         <h2 style={{ fontSize: '1.5rem', textAlign: 'center' }}>Create your account</h2>

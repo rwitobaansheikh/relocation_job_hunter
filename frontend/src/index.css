@@ -939,3 +939,22 @@ label {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
 }
+
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  text-decoration: none;
+}
+.brand-logo img {
+  height: 1.4em;
+  margin-right: 0.25em;
+  margin-top: -0.2em;
+}
+.brand-logo .text-main {
+  color: var(--text);
+}
+.brand-logo .text-accent {
+  color: var(--accent);
+}
