@@ -147,7 +147,7 @@ class JobSearchService:
             job.salary_currency, job.salary_text = currency, salary_label
 
             # Hard exclusions: US-based roles and blacklisted companies (Canonical).
-            excluded, _reason = self.matcher.is_excluded(job)
+            excluded, _reason = self.matcher.is_excluded(job, filters.locations)
             if excluded:
                 stats["jobs_filtered_excluded"] += 1
                 continue
