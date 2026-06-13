@@ -1,6 +1,7 @@
 """Match and score jobs against user CV and filters."""
 
 import re
+from typing import Optional
 
 from app.database import UserProfile
 from app.services.scraper.base import (
@@ -147,6 +148,10 @@ class JobMatcher:
 
         # Early-career filters (intern/entry): require a matching early signal.
         if max_rank <= _LEVEL_RANK["entry"]:
+            if job.source == "linkedin":
+                # LinkedIn was already filtered by f_E (Experience Level) during scrape.
+                # If we made it here without signaling a *higher* level, trust the LinkedIn tag.
+                return True
             early_levels = [lvl for lvl in allowed if _LEVEL_RANK[lvl] <= _LEVEL_RANK["entry"]]
             return self._signals_levels(job, early_levels)
 
@@ -281,9 +286,9 @@ class JobMatcher:
         ratio = overlap / max(len(cv_tokens), 1)
         return min(40.0, ratio * 80 + overlap * 0.5)
 
-    def is_excluded(self, job: RawJob) -> tuple[bool, str]:
-        """Hard exclusions applied before other filters: drop US-based roles and
-        any blacklisted companies (e.g. Canonical)."""
+    def is_excluded(self, job: RawJob, requested_locations: Optional[list[str]] = None) -> tuple[bool, str]:
+        """Hard exclusions applied before other filters: drop blacklisted companies.
+        Only drops US-based roles if the user didn't explicitly request US locations."""
         company = (job.company or "").lower()
         for blocked in EXCLUDED_COMPANIES:
             if blocked in company:
@@ -291,7 +296,13 @@ class JobMatcher:
 
         location_text = " ".join([job.location, " ".join(job.tags)]).lower()
         if self._is_us_location(location_text):
-            return True, "US location"
+            # Check if user explicitly asked for US
+            req = " ".join(requested_locations or []).lower()
+            req_words = set(re.findall(r"\b[a-z]+\b", req))
+            if "us" in req_words or "usa" in req_words or "united states" in req:
+                pass # User explicitly wants US jobs
+            else:
+                return True, "US location"
         return False, ""
 
     @staticmethod
