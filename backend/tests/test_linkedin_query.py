@@ -5,6 +5,13 @@ from app.services.scraper.linkedin_query import (
     resolve_work_type_codes,
     split_locations,
 )
+from app.services.scraper.linkedin import compute_fetch_limit
+
+
+def test_compute_fetch_limit_scales_for_multi_country():
+    assert compute_fetch_limit(requested=100, locations=["UK", "DE", "NL", "FR", "ES"]) == 125
+    assert compute_fetch_limit(requested=100, locations=["UK", "DE", "NL", "FR", "ES", "IT", "PT"]) == 175
+    assert compute_fetch_limit(requested=100, locations=["UK"]) == 150
 
 
 def test_experience_codes_for_intern_and_entry():

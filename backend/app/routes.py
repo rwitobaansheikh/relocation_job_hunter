@@ -376,7 +376,10 @@ async def search_jobs(
         stats = await service.search_jobs(db, profile.id, request.max_jobs, filters)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    return SearchStatsResponse(jobs_stored=stats["jobs_stored"])
+    return SearchStatsResponse(
+        jobs_found=stats["jobs_found"],
+        jobs_stored=stats["jobs_stored"],
+    )
 
 
 # --------------------------------------------------------------------------- #

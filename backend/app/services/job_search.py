@@ -21,7 +21,7 @@ from app.services.scraper.linkedin_query import (
     resolve_work_type_codes,
     split_locations,
 )
-from app.services.scraper.linkedin import LinkedInScraper
+from app.services.scraper.linkedin import LinkedInScraper, compute_fetch_limit
 from app.services.scraper.relocateme import RelocateMeScraper
 from app.services.scraper.remotive import RemotiveScraper
 from app.services.scraper.remoteok import RemoteOKScraper
@@ -107,16 +107,26 @@ class JobSearchService:
         if not linkedin_geo:
             linkedin_geo = [""]
 
+        existing_external_ids = self._existing_external_ids(db, user_profile_id)
+
         raw_jobs = await self._fetch_all(
             roles,
             linkedin_geo,
             age_hours,
+            max_jobs=max_jobs,
+            exclude_external_ids=existing_external_ids,
             experience_codes=filters.experience_codes(),
             salary_bucket=salary_to_fe_bucket(filters.min_salary),
             work_type_codes=filters.linkedin_work_type_codes(),
         )
+        logger.info(
+            "Search fetched %d raw jobs (roles=%s locations=%s)",
+            len(raw_jobs),
+            roles,
+            linkedin_geo,
+        )
         stats = {
-            "jobs_found": len(raw_jobs),
+            "jobs_found": 0,
             "jobs_filtered_excluded": 0,
             "jobs_filtered_age": 0,
             "jobs_filtered_experience": 0,
@@ -141,30 +151,27 @@ class JobSearchService:
                 stats["jobs_filtered_excluded"] += 1
                 continue
 
-            # Constraint 1: posted within the freshness window. Unknown dates are
-            # rejected since the constraint can't be verified for them.
-            if not job.posted_at or job.posted_at < cutoff:
+            # LinkedIn already applies f_TPR at search time; only reject when we
+            # have a posted_at that is clearly outside the window.
+            if job.posted_at and job.posted_at < cutoff:
                 stats["jobs_filtered_age"] += 1
                 continue
 
-            # Constraint 2: seniority must be within the requested levels (when
-            # set). Higher levels are excluded; untagged roles must match signals.
             seniority_level = self.matcher.classify_seniority(job)
             if not self.matcher.matches_seniority(job, filters.seniority_levels):
                 stats["jobs_filtered_experience"] += 1
                 continue
 
-            # Relocation/visa info is still recorded (for scoring + display) but
-            # is no longer a hard filter.
             offers_relocation, relocation_kw = self.matcher.check_relocation(job)
 
-            # Constraint 4: must match one of the requested roles.
-            if not self.matcher.matches_roles(job, roles):
+            # LinkedIn results were already fetched with role keywords — don't
+            # re-filter them with a strict text match.
+            if job.source != "linkedin" and not self.matcher.matches_roles(job, roles):
                 stats["jobs_filtered_role"] += 1
                 continue
 
-            # Constraint 3: must be in one of the requested locations.
-            if not self.matcher.matches_locations(job, locations):
+            # LinkedIn results were already fetched per location query.
+            if job.source != "linkedin" and not self.matcher.matches_locations(job, locations):
                 stats["jobs_filtered_country"] += 1
                 continue
 
@@ -177,7 +184,9 @@ class JobSearchService:
             filtered.append((job, score, seniority_level, relocation_kw, offers_relocation))
 
         filtered.sort(key=lambda x: x[1], reverse=True)
-        top_jobs = filtered[:max_jobs]
+        new_jobs = [item for item in filtered if item[0].external_id not in existing_external_ids]
+        stats["jobs_found"] = len(new_jobs)
+        top_jobs = new_jobs[:max_jobs]
 
         for job, score, seniority_level, relocation_kw, offers_relocation in top_jobs:
             existing = db.query(Job).filter(Job.external_id == job.external_id).first()
@@ -232,26 +241,48 @@ class JobSearchService:
                 stats["jobs_stored"] += 1
 
         db.commit()
+        logger.info(
+            "Search stored %d new jobs (raw_new=%d, matched_new=%d, already_had=%d)",
+            stats["jobs_stored"],
+            len(raw_jobs),
+            len(new_jobs),
+            len(existing_external_ids),
+        )
         return stats
+
+    @staticmethod
+    def _existing_external_ids(db: Session, user_profile_id: int) -> set[str]:
+        rows = (
+            db.query(Job.external_id)
+            .join(JobApplication, JobApplication.job_id == Job.id)
+            .filter(JobApplication.user_profile_id == user_profile_id)
+            .all()
+        )
+        return {row[0] for row in rows if row[0]}
 
     async def _fetch_all(
         self,
         roles: list[str] | None = None,
         locations: list[str] | None = None,
         age_hours: int = 48,
+        max_jobs: int = 100,
+        exclude_external_ids: Optional[set[str]] = None,
         experience_codes: Optional[str] = None,
         salary_bucket: Optional[str] = None,
         work_type_codes: Optional[list[str]] = None,
     ) -> list[RawJob]:
+        linkedin_limit = compute_fetch_limit(requested=max_jobs, locations=locations)
+        exclude = exclude_external_ids or set()
         tasks = []
         for scraper in self.scrapers:
             if isinstance(scraper, LinkedInScraper):
                 tasks.append(
                     scraper.fetch_jobs(
-                        limit=150,
+                        limit=linkedin_limit,
                         roles=roles,
                         locations=locations,
                         age_hours=age_hours,
+                        exclude_external_ids=exclude,
                         experience_codes=experience_codes,
                         salary_bucket=salary_bucket,
                         work_type_codes=work_type_codes,
@@ -268,6 +299,8 @@ class JobSearchService:
                 logger.warning("Scraper failed: %s", result)
                 continue
             for job in result:
+                if job.external_id in exclude:
+                    continue
                 if job.external_id not in seen_ids:
                     seen_ids.add(job.external_id)
                     all_jobs.append(job)

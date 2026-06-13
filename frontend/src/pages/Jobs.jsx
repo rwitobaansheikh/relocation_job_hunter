@@ -495,7 +495,7 @@ export default function Jobs() {
           onClick={handleSearch}
           disabled={searching}
           title="Start Job Search"
-          help="Runs a search across LinkedIn, RemoteOK, Remotive, and more. Up to 100 best matches are ranked against your CV and saved to Applications."
+          help="Runs a search across LinkedIn, RemoteOK, Remotive, and more. With 5+ countries selected, fetches at least 100 jobs ranked against your CV and saved to Applications."
         >
           {searching ? 'Searching... (this may take a minute)' : 'Start Job Search'}
         </HelpButton>
@@ -506,7 +506,9 @@ export default function Jobs() {
       {results && (
         <div className="card">
           <p style={{ fontSize: '1.05rem', marginBottom: '0.6rem' }}>
-            <strong>{results.jobs_stored}</strong> new {results.jobs_stored === 1 ? 'job' : 'jobs'} added to{' '}
+            Found <strong>{results.jobs_found}</strong> new matching {results.jobs_found === 1 ? 'job' : 'jobs'}.
+            {' '}
+            <strong>{results.jobs_stored}</strong> {results.jobs_stored === 1 ? 'was' : 'were'} saved to{' '}
             <a href="/app/applications">Applications</a>.
           </p>
         </div>

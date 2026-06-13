@@ -462,4 +462,5 @@ class FollowUpRequest(BaseModel):
 
 
 class SearchStatsResponse(BaseModel):
+    jobs_found: int
     jobs_stored: int

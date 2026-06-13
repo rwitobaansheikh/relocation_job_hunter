@@ -1,11 +1,10 @@
-"""LinkedIn public/guest job-search scraper."""
+"""LinkedIn guest job-search scraper using direct search query params."""
 
 import asyncio
 import logging
 import re
 from datetime import datetime
 from typing import Optional
-from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
@@ -13,9 +12,7 @@ from bs4 import BeautifulSoup
 from app.services.scraper.base import RawJob
 from app.services.scraper.linkedin_query import (
     GUEST_SEARCH_URL,
-    PUBLIC_SEARCH_URL,
     build_linkedin_search_params,
-    build_linkedin_search_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,18 +22,35 @@ _USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
+# When searching 5+ countries, aim for at least this many unique jobs total.
+MIN_JOBS_MULTI_COUNTRY = 100
+MIN_LOCATIONS_FOR_QUOTA = 5
+JOBS_PER_LOCATION = 25
+GLOBAL_FETCH_CAP = 400
+
+
+def compute_fetch_limit(
+    *,
+    requested: int = 100,
+    locations: Optional[list[str]] = None,
+) -> int:
+    """Scale LinkedIn fetch budget so multi-country searches reach 100+ jobs."""
+    geo = [loc for loc in (locations or []) if loc]
+    if len(geo) >= MIN_LOCATIONS_FOR_QUOTA:
+        return min(GLOBAL_FETCH_CAP, max(requested, MIN_JOBS_MULTI_COUNTRY, len(geo) * JOBS_PER_LOCATION))
+    return min(GLOBAL_FETCH_CAP, max(requested, 150))
+
 
 class LinkedInScraper:
     source_name = "linkedin"
     search_url = GUEST_SEARCH_URL
-    public_search_url = PUBLIC_SEARCH_URL
     detail_url = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
 
     MAX_ROLES = 8
     MAX_LOCATIONS = 15
-    PAGES_PER_QUERY = 4
+    PAGES_PER_QUERY = 8
     PAGE_SIZE = 25
-    MIN_PER_QUERY = 20
+    MAX_RETRIES = 3
 
     async def fetch_jobs(
         self,
@@ -47,57 +61,96 @@ class LinkedInScraper:
         experience_codes: Optional[str] = None,
         salary_bucket: Optional[str] = None,
         work_type_codes: Optional[list[str]] = None,
+        exclude_external_ids: Optional[set[str]] = None,
     ) -> list[RawJob]:
         role_terms = [r for r in (roles or []) if r][: self.MAX_ROLES] or [""]
         location_terms = [loc for loc in (locations or []) if loc][: self.MAX_LOCATIONS]
         if not location_terms:
             location_terms = [""]
 
-        query_pairs = [(role, loc) for role in role_terms for loc in location_terms]
-        per_query_cap = max(
-            self.MIN_PER_QUERY,
-            limit // max(len(query_pairs), 1) + 5,
+        exclude = exclude_external_ids or set()
+        global_limit = compute_fetch_limit(requested=limit, locations=location_terms)
+        # Paginate deeper on repeat searches when many results are already saved.
+        fetch_cap = min(
+            GLOBAL_FETCH_CAP,
+            global_limit + min(len(exclude), 250),
         )
+        target_new = global_limit
+        per_location_target = (
+            max(JOBS_PER_LOCATION, target_new // len(location_terms))
+            if len(location_terms) >= MIN_LOCATIONS_FOR_QUOTA
+            else target_new
+        )
+        pages_per_query = self.PAGES_PER_QUERY + (4 if exclude else 0)
+
+        def is_new(job_id: str) -> bool:
+            return f"linkedin-{job_id}" not in exclude
 
         cards: dict[str, dict] = {}
         async with httpx.AsyncClient(
             timeout=30.0, follow_redirects=True, headers={"User-Agent": _USER_AGENT}
         ) as client:
-            for role, location in query_pairs:
-                if len(cards) >= limit:
-                    break
-                query_count = 0
-                for page in range(self.PAGES_PER_QUERY):
-                    if len(cards) >= limit or query_count >= per_query_cap:
+            # Location-first so every country is queried before the global cap fills up.
+            for location in location_terms:
+                location_new = sum(
+                    1
+                    for card in cards.values()
+                    if card.get("search_location") == location and is_new(card["job_id"])
+                )
+                for role in role_terms:
+                    new_count = sum(1 for card in cards.values() if is_new(card["job_id"]))
+                    if new_count >= target_new:
                         break
-                    start = page * self.PAGE_SIZE
-                    found = await self._search(
-                        client,
-                        keywords=role,
-                        location=location,
-                        age_hours=age_hours,
-                        start=start,
-                        experience_codes=experience_codes,
-                        salary_bucket=salary_bucket,
-                        work_type_codes=work_type_codes,
-                    )
-                    if not found:
+                    if location_new >= per_location_target:
                         break
-                    for card in found:
-                        if card["job_id"] and card["job_id"] not in cards:
-                            card["search_location"] = location
-                            cards[card["job_id"]] = card
-                            query_count += 1
-                            if query_count >= per_query_cap:
+                    for page in range(pages_per_query):
+                        new_count = sum(1 for card in cards.values() if is_new(card["job_id"]))
+                        if new_count >= target_new:
+                            break
+                        if len(cards) >= fetch_cap:
+                            break
+                        if location_new >= per_location_target:
+                            break
+                        start = page * self.PAGE_SIZE
+                        found = await self._search(
+                            client,
+                            keywords=role,
+                            location=location,
+                            age_hours=age_hours,
+                            start=start,
+                            experience_codes=experience_codes,
+                            salary_bucket=salary_bucket,
+                            work_type_codes=work_type_codes,
+                        )
+                        if not found:
+                            break
+                        for card in found:
+                            if len(cards) >= fetch_cap:
                                 break
+                            if card["job_id"] and card["job_id"] not in cards:
+                                card["search_location"] = location
+                                cards[card["job_id"]] = card
+                                if is_new(card["job_id"]):
+                                    location_new += 1
+                        await asyncio.sleep(0.5)
+                await asyncio.sleep(1.0)
 
-            selected = list(cards.values())[:limit]
+            new_cards = [card for card in cards.values() if is_new(card["job_id"])]
+            selected = new_cards[:target_new]
+
+            logger.info(
+                "LinkedIn fetched %d new cards (%d total scraped, target=%d, locations=%d)",
+                len(selected),
+                len(cards),
+                target_new,
+                len(location_terms),
+            )
 
             semaphore = asyncio.Semaphore(4)
 
             async def enrich(card: dict) -> None:
                 async with semaphore:
-                    await asyncio.sleep(0.4)
+                    await asyncio.sleep(0.35)
                     card["description"] = await self._fetch_description(client, card["job_id"])
 
             await asyncio.gather(*(enrich(c) for c in selected), return_exceptions=True)
@@ -141,61 +194,31 @@ class LinkedInScraper:
             salary_bucket=salary_bucket,
             start=start,
         )
-
-        results = await self._search_guest_api(client, params)
-        if not results:
-            results = await self._search_public_page(client, params)
-        return results
-
-    async def _search_guest_api(
-        self, client: httpx.AsyncClient, params: dict[str, str]
-    ) -> list[dict]:
-        try:
-            response = await client.get(self.search_url, params=params)
-            response.raise_for_status()
-        except Exception as exc:
-            logger.warning(
-                "LinkedIn guest search failed (params=%s): %s", params, exc
-            )
-            return []
-
-        return self._parse_result_cards(response.text)
-
-    async def _search_public_page(
-        self, client: httpx.AsyncClient, params: dict[str, str]
-    ) -> list[dict]:
-        """Fallback: fetch the public search page (n8n HTML extraction path)."""
-        url = build_linkedin_search_url(params)
-        try:
-            response = await client.get(url)
-            response.raise_for_status()
-        except Exception as exc:
-            logger.warning("LinkedIn public search failed (%s): %s", url, exc)
-            return []
-
-        soup = BeautifulSoup(response.text, "lxml")
-        results: list[dict] = []
-        for link_el in soup.select(
-            'ul.jobs-search__results-list li div a[class*="base-card"]'
-        ):
-            href = (link_el.get("href") or "").strip()
-            if not href:
-                continue
-            full_url = urljoin(self.public_search_url, href)
-            job_id = self._job_id_from_url(full_url)
-            if not job_id:
-                continue
-            results.append(
-                {
-                    "job_id": job_id,
-                    "url": full_url.split("?")[0],
-                    "title": link_el.get_text(strip=True) or "",
-                    "company": "",
-                    "location": "",
-                    "posted_at": None,
-                }
-            )
-        return results
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = await client.get(self.search_url, params=params)
+                if response.status_code == 429:
+                    wait = 2 ** attempt + 1
+                    logger.warning(
+                        "LinkedIn rate limited (429), retry %d/%d in %ds",
+                        attempt + 1,
+                        self.MAX_RETRIES,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                response.raise_for_status()
+                return self._parse_result_cards(response.text)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 429 and attempt < self.MAX_RETRIES - 1:
+                    await asyncio.sleep(2 ** attempt + 1)
+                    continue
+                logger.warning("LinkedIn search failed (params=%s): %s", params, exc)
+                return []
+            except Exception as exc:
+                logger.warning("LinkedIn search failed (params=%s): %s", params, exc)
+                return []
+        return []
 
     def _parse_result_cards(self, html: str) -> list[dict]:
         soup = BeautifulSoup(html, "lxml")
