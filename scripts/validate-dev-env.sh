@@ -41,7 +41,9 @@ require SMTP_PASSWORD
 require APP_BASE_URL
 require CORS_ORIGINS
 
-warn_if CLOUDFLARE_TUNNEL_TOKEN "Remove CLOUDFLARE_TUNNEL_TOKEN from dev (use tunnel route to :8080)"
+if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]]; then
+  warn+=("Remove CLOUDFLARE_TUNNEL_TOKEN from dev — use tunnel route to :8080 instead")
+fi
 
 if [[ "${STRIPE_SECRET_KEY:-}" == sk_live_* ]]; then
   warn+=("STRIPE_SECRET_KEY looks LIVE — use sk_test_ on dev")
