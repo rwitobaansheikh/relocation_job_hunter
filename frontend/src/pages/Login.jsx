@@ -34,10 +34,12 @@ export default function Login() {
         {theme === 'dark' ? '☀ Light mode' : '☾ Dark mode'}
       </button>
       <div className="auth-card card">
-        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-          <img src="/logo-full.png" alt="Job Application Flow" style={{ height: '36px', objectFit: 'contain' }} />
+        <div style={{ textAlign: 'center', marginBottom: '1.5rem', display: 'flex', justifyContent: 'center' }}>
+          <div style={{ background: 'white', padding: '8px 16px', borderRadius: '12px', display: 'inline-flex', alignItems: 'center' }}>
+            <img src="/logo-full.png" alt="Job Application Flow" style={{ height: '36px', objectFit: 'contain' }} />
+          </div>
         </div>
-        <h2 style={{ fontSize: '1.5rem' }}>Welcome back</h2>
+        <h2 style={{ fontSize: '1.5rem', textAlign: 'center' }}>Welcome back</h2>
         <p className="page-subtitle" style={{ textAlign: 'center', marginBottom: '1.5rem' }}>Log in to continue</p>
         {error && <div className="alert alert-error">{error}</div>}
         <form onSubmit={submit}>

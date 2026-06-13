@@ -40,7 +40,7 @@ export default function Landing() {
   return (
     <div className="landing">
       <nav className="landing-nav">
-        <div className="brand">
+        <div className="brand" style={{ background: 'white', padding: '6px 12px', borderRadius: '12px', display: 'flex', alignItems: 'center' }}>
           <img src="/logo-full.png" alt="Job Application Flow" style={{ height: '32px', objectFit: 'contain' }} />
         </div>
         <div className="links">
