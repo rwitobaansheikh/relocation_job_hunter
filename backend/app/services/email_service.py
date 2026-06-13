@@ -366,16 +366,26 @@ Best regards,
     def _smtp_config(profile) -> dict:
         """Resolve the sending identity: the user's own SMTP credentials when
         configured (hybrid model), otherwise the shared app-level credentials."""
+        user_email = ""
+        user = getattr(profile, "user", None)
+        if user and getattr(user, "email", None):
+            user_email = user.email.strip()
+        if not user_email:
+            user_email = (getattr(profile, "email", None) or "").strip()
+            
+        sender_name = getattr(profile, "full_name", "") or "Job Hunter"
+        from_address = f"{sender_name} <{user_email}>" if user_email else ""
+
         password = decrypt_secret(getattr(profile, "smtp_password_enc", "") or "")
         if getattr(profile, "smtp_user", "") and password:
             host = profile.smtp_host or settings.smtp_host
-            user = profile.smtp_user
+            smtp_user = profile.smtp_user
             return {
                 "host": host,
                 "port": profile.smtp_port or settings.smtp_port,
-                "user": user,
+                "user": smtp_user,
                 "password": password,
-                "from": profile.smtp_from or user,
+                "from": profile.smtp_from or from_address or smtp_user,
             }
         # Fall back to the shared, app-level mailbox.
         return {
@@ -383,7 +393,7 @@ Best regards,
             "port": settings.smtp_port,
             "user": settings.smtp_user,
             "password": settings.smtp_password,
-            "from": settings.smtp_from or settings.smtp_user,
+            "from": from_address or settings.smtp_from or settings.smtp_user,
         }
 
     async def send_system_email(self, to: str, subject: str, body: str) -> None:
@@ -415,6 +425,11 @@ Best regards,
         msg["From"] = smtp["from"] or smtp["user"]
         msg["To"] = to
         msg["Subject"] = subject
+        
+        # Add Reply-To just in case the SMTP provider rewrites the From header
+        if smtp.get("from"):
+            msg.add_header("Reply-To", smtp["from"])
+
         msg.attach(MIMEText(body, "plain"))
 
         for file_path in attachments:
