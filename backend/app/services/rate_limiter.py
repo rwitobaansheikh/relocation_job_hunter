@@ -44,7 +44,7 @@ class _TokenBucket:
 _buckets: dict[str, _TokenBucket] = {
     "llm": _TokenBucket(settings.llm_rate_per_min),
     "gemini": _TokenBucket(settings.gemini_rate_per_min),  # legacy alias
-    "hunter": _TokenBucket(settings.hunter_rate_per_min),
+    "rocketreach": _TokenBucket(settings.rocketreach_rate_per_min),
 }
 
 

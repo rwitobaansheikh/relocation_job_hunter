@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: float = 300.0
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
-    hunter_api_key: str = ""
+    rocketreach_api_key: str = ""
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
     smtp_user: str = ""
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     # Requests/minute budgeted across ALL users for the shared API keys.
     llm_rate_per_min: int = 60
     gemini_rate_per_min: int = 12
-    hunter_rate_per_min: int = 10
+    rocketreach_rate_per_min: int = 10
     # Safety ceiling for daily outbound emails per user (overridable per profile).
     default_daily_send_cap: int = 20
     default_per_domain_cap: int = 2

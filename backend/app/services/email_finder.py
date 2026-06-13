@@ -1,4 +1,4 @@
-"""Find hiring manager and employee emails via Hunter.io."""
+"""Find hiring manager and employee emails via RocketReach API."""
 
 import logging
 from dataclasses import dataclass
@@ -20,11 +20,11 @@ class Contact:
 
 
 class EmailFinder:
-    hunter_base = "https://api.hunter.io/v2"
+    rocketreach_base = "https://api.rocketreach.co/api/v2"
 
     async def find_contacts(self, company: str, domain: str, job_title: str, limit: int = 5) -> list[Contact]:
-        if not settings.hunter_api_key:
-            logger.warning("Hunter.io API key not configured")
+        if not settings.rocketreach_api_key:
+            logger.warning("RocketReach API key not configured")
             return self._fallback_contacts(company, domain, limit)
 
         domain = self._normalize_domain(domain, company)
@@ -32,124 +32,91 @@ class EmailFinder:
             return []
 
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # Priority order: HR first, then IT, then any department so we still
-            # surface contacts for roles where neither HR nor IT is published.
-            contacts = await self._department_search(client, domain, "hr", limit)
-            if not contacts:
-                logger.info("No HR contacts for %s, trying IT department", domain)
-                contacts = await self._department_search(client, domain, "it", limit)
-            if not contacts:
-                logger.info("No HR/IT contacts for %s, trying unfiltered domain search", domain)
-                contacts = await self._domain_search(client, domain, limit)
+            # 1. Search for profiles matching HR / Recruiting at the target company
+            search_url = f"{self.rocketreach_base}/person/search"
+            headers = {
+                "Api-Key": settings.rocketreach_api_key,
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "query": {
+                    "current_employer": [domain, company],
+                    "current_title": ["hr", "human resources", "recruiter", "talent acquisition", "hiring"]
+                }
+            }
 
-        seen = set()
-        unique: list[Contact] = []
-        for c in contacts:
-            if c.email and c.email not in seen:
-                seen.add(c.email)
-                unique.append(c)
+            try:
+                await rate_limiter.acquire("rocketreach")
+                response = await client.post(search_url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                # RocketReach sometimes returns profiles at the root or within 'profiles' key
+                profiles = data.get("profiles", data) if isinstance(data, dict) else data
+                if not isinstance(profiles, list):
+                    profiles = []
+            except Exception as exc:
+                logger.error("RocketReach person search failed for %s: %s", domain, exc)
+                profiles = []
 
-        verified = await self._filter_verified(unique)
-        # Last resort: if Hunter has the domain but everything got filtered out
-        # (or returned nothing), fall back to generic role addresses so the user
-        # always has someone to contact.
-        if not verified:
-            logger.info("No verified contacts for %s, using generic role addresses", domain)
-            return self._fallback_contacts(company, domain, limit)
-        return verified[:limit]
-
-    async def _filter_verified(self, contacts: list[Contact]) -> list[Contact]:
-        """Drop addresses Hunter flags as undeliverable. Keeps unknown/risky ones."""
-        if not contacts:
-            return contacts
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            kept: list[Contact] = []
-            for c in contacts:
-                status = await self._verify_email(client, c.email)
-                if status == "undeliverable":
-                    logger.info("Skipping undeliverable address %s", c.email)
+            # 2. Look up contact info for the top candidates
+            contacts: list[Contact] = []
+            seen_emails = set()
+            
+            for profile in profiles:
+                if len(contacts) >= limit:
+                    break
+                
+                person_id = profile.get("id")
+                if not person_id:
                     continue
-                kept.append(c)
-        return kept
 
-    async def _verify_email(self, client: httpx.AsyncClient, email: str) -> str:
-        try:
-            await rate_limiter.acquire("hunter")
-            response = await client.get(
-                f"{self.hunter_base}/email-verifier",
-                params={"email": email, "api_key": settings.hunter_api_key},
-            )
-            response.raise_for_status()
-            return response.json().get("data", {}).get("status", "unknown")
-        except Exception as exc:
-            logger.warning("Email verification failed for %s: %s", email, exc)
-            return "unknown"
+                try:
+                    await rate_limiter.acquire("rocketreach")
+                    lookup_url = f"{self.rocketreach_base}/person/lookup"
+                    lookup_resp = await client.get(lookup_url, params={"id": person_id}, headers=headers)
+                    lookup_resp.raise_for_status()
+                    person_data = lookup_resp.json()
+                    
+                    emails = person_data.get("emails", [])
+                    name = person_data.get("name") or profile.get("name") or "Hiring Team"
+                    title = person_data.get("current_title") or profile.get("current_title") or "Recruiter"
+                    
+                    # Prefer professional, valid emails
+                    best_email = None
+                    for e in emails:
+                        # Sometimes valid is a string "true" or boolean True
+                        is_valid = str(e.get("valid", "")).lower() == "true" or str(e.get("smtp_valid", "")).lower() == "valid"
+                        if e.get("type") == "professional" and is_valid:
+                            best_email = e.get("email")
+                            break
+                            
+                    # Fallback to any professional email, then any valid email, then just first email
+                    if not best_email and emails:
+                        for e in emails:
+                            if e.get("type") == "professional":
+                                best_email = e.get("email")
+                                break
+                        if not best_email:
+                            best_email = emails[0].get("email")
+                            
+                    if best_email and best_email not in seen_emails:
+                        seen_emails.add(best_email)
+                        contacts.append(Contact(
+                            name=name,
+                            email=best_email,
+                            title=title,
+                            confidence=90  # RocketReach verified
+                        ))
+                except Exception as exc:
+                    logger.warning("RocketReach lookup failed for ID %s: %s", person_id, exc)
 
-    async def _domain_search(
-        self, client: httpx.AsyncClient, domain: str, limit: int
-    ) -> list[Contact]:
-        """Unfiltered domain search, prioritizing hiring-related titles."""
-        try:
-            await rate_limiter.acquire("hunter")
-            response = await client.get(
-                f"{self.hunter_base}/domain-search",
-                params={
-                    "domain": domain,
-                    "api_key": settings.hunter_api_key,
-                    "limit": limit,
-                },
-            )
-            response.raise_for_status()
-            emails = response.json().get("data", {}).get("emails", [])
-
-            hiring_keywords = ["hr", "recruit", "talent", "hiring", "people", "human resources"]
-            prioritized: list[Contact] = []
-            others: list[Contact] = []
-            for e in emails:
-                contact = Contact(
-                    name=f"{e.get('first_name', '')} {e.get('last_name', '')}".strip(),
-                    email=e.get("value", ""),
-                    title=e.get("position") or "",
-                    confidence=e.get("confidence", 0),
-                )
-                title_lower = contact.title.lower()
-                if any(kw in title_lower for kw in hiring_keywords):
-                    prioritized.append(contact)
-                else:
-                    others.append(contact)
-            return (prioritized + others)[:limit]
-        except Exception as exc:
-            logger.error("Hunter domain search failed for %s: %s", domain, exc)
-            return []
-
-    async def _department_search(
-        self, client: httpx.AsyncClient, domain: str, department: str, limit: int
-    ) -> list[Contact]:
-        try:
-            await rate_limiter.acquire("hunter")
-            response = await client.get(
-                f"{self.hunter_base}/domain-search",
-                params={
-                    "domain": domain,
-                    "department": department,
-                    "api_key": settings.hunter_api_key,
-                    "limit": limit,
-                },
-            )
-            response.raise_for_status()
-            emails = response.json().get("data", {}).get("emails", [])
-            return [
-                Contact(
-                    name=f"{e.get('first_name', '')} {e.get('last_name', '')}".strip(),
-                    email=e.get("value", ""),
-                    title=e.get("position") or "",
-                    confidence=e.get("confidence", 0),
-                )
-                for e in emails[:limit]
-            ]
-        except Exception as exc:
-            logger.error("Hunter department search failed: %s", exc)
-            return []
+        # Last resort: if RocketReach API failed or found nothing, fall back to generic role addresses
+        if not contacts:
+            logger.info("No verified contacts from RocketReach for %s, using generic role addresses", domain)
+            return self._fallback_contacts(company, domain, limit)
+            
+        return contacts[:limit]
 
     @staticmethod
     def _normalize_domain(domain: str, company: str) -> str:
