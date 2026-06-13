@@ -81,6 +81,18 @@ jobs:
           echo "sg_id=$SG_ID" >> "$GITHUB_OUTPUT"
           sleep 5
 
+      - name: Ensure dev directories on EC2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 2m
+          script: |
+            set -euo pipefail
+            sudo mkdir -p /opt/app-dev /data-dev/uploads /data-dev/generated
+            sudo chown -R ec2-user:ec2-user /opt/app-dev /data-dev
+
       - name: Copy files to EC2
         uses: appleboy/scp-action@v0.1.7
         with:
