@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import HelpButton from '../components/HelpButton'
 
 const SENIORITY_OPTIONS = [
   { value: 'intern', label: 'Internship' },
@@ -104,10 +105,24 @@ function LoopForm({ initial, onCancel, onSave, saving, autoCap }) {
       </label>
 
       <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.8rem' }}>
-        <button className="btn-primary" disabled={saving || !form.role.trim()} onClick={() => onSave(form)}>
+        <HelpButton
+          className="btn-primary"
+          disabled={saving || !form.role.trim()}
+          onClick={() => onSave(form)}
+          title="Save loop"
+          help="Saves this automation loop. It will search, tailor, and send applications on the schedule you set."
+        >
           {saving ? 'Saving…' : 'Save loop'}
-        </button>
-        <button className="btn-secondary" onClick={onCancel} disabled={saving}>Cancel</button>
+        </HelpButton>
+        <HelpButton
+          className="btn-secondary"
+          onClick={onCancel}
+          disabled={saving}
+          title="Cancel"
+          help="Close the form without saving changes to this loop."
+        >
+          Cancel
+        </HelpButton>
       </div>
     </div>
   )
@@ -216,14 +231,15 @@ export default function Automation() {
         {!canAutomate ? (
           <a className="btn-primary" href="/app/billing">Upgrade to enable automation</a>
         ) : (
-          <button
+          <HelpButton
             className="btn-primary"
             disabled={editing === 'new' || atCap}
             onClick={() => setEditing('new')}
-            title={atCap ? 'Loop limit reached for your plan' : ''}
+            title="Add loop"
+            help="Create a new automation loop that searches one role on a timer, tailors documents, and sends applications for you."
           >
             + Add loop
-          </button>
+          </HelpButton>
         )}
       </div>
 
@@ -271,11 +287,32 @@ export default function Automation() {
                   </div>
                 </div>
                 <div className="job-actions">
-                  <button className="btn-secondary" onClick={() => toggle(loop)}>
+                  <HelpButton
+                    className="btn-secondary"
+                    onClick={() => toggle(loop)}
+                    title={loop.enabled ? 'Disable' : 'Enable'}
+                    help={loop.enabled
+                      ? 'Pause this loop — it will stop searching and sending until you turn it back on.'
+                      : 'Resume this loop so it runs again on its schedule.'}
+                  >
                     {loop.enabled ? 'Disable' : 'Enable'}
-                  </button>
-                  <button className="btn-secondary" onClick={() => setEditing(loop.id)}>Edit</button>
-                  <button className="btn-danger" onClick={() => remove(loop)}>Delete</button>
+                  </HelpButton>
+                  <HelpButton
+                    className="btn-secondary"
+                    onClick={() => setEditing(loop.id)}
+                    title="Edit"
+                    help="Change the role, locations, schedule, or daily send limits for this automation loop."
+                  >
+                    Edit
+                  </HelpButton>
+                  <HelpButton
+                    className="btn-danger"
+                    onClick={() => remove(loop)}
+                    title="Delete"
+                    help="Remove this loop permanently. Running automations for this role will stop."
+                  >
+                    Delete
+                  </HelpButton>
                 </div>
               </div>
             )

@@ -16,6 +16,7 @@ import Billing from './pages/Billing'
 import Settings from './pages/Settings'
 import Feedback from './pages/Feedback'
 import Admin from './pages/Admin'
+import HelpButton from './components/HelpButton'
 
 function PlanBadge() {
   const [billing, setBilling] = useState(null)
@@ -36,6 +37,9 @@ function PlanBadge() {
 function ProtectedLayout() {
   const { user, loading, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
+  const [navOpen, setNavOpen] = useState(false)
+
+  const closeNav = () => setNavOpen(false)
 
   if (loading) return <div className="layout"><main className="main"><p>Loading...</p></main></div>
   if (!user) return <Navigate to="/login" replace />
@@ -43,33 +47,58 @@ function ProtectedLayout() {
   return (
     <ProfileProvider>
       <div className="layout">
-        <nav className="sidebar">
-          <h1>Job Application Flow</h1>
-          <NavLink to="/app" end>Dashboard</NavLink>
-          <NavLink to="/app/profile">Profile & Uploads</NavLink>
-          <NavLink to="/app/jobs">Search Jobs</NavLink>
-          <NavLink to="/app/applications">Applications</NavLink>
-          <NavLink to="/app/automation">Automation</NavLink>
-          <NavLink to="/app/billing">Plan & Billing</NavLink>
-          <NavLink to="/app/settings">Settings</NavLink>
-          <NavLink to="/app/feedback">Feedback</NavLink>
-          {user.role === 'admin' && <NavLink to="/app/admin">Admin</NavLink>}
+        <button
+          type="button"
+          className="mobile-nav-toggle"
+          aria-label="Open navigation menu"
+          onClick={() => setNavOpen(true)}
+        >
+          ☰
+        </button>
+        <div
+          className={`sidebar-backdrop${navOpen ? ' visible' : ''}`}
+          onClick={closeNav}
+          aria-hidden="true"
+        />
+        <nav className={`sidebar${navOpen ? ' sidebar-open' : ''}`}>
+          <div className="sidebar-header">
+            <h1>Job Application Flow</h1>
+            <button type="button" className="sidebar-close" aria-label="Close menu" onClick={closeNav}>
+              ×
+            </button>
+          </div>
+          <NavLink to="/app" end onClick={closeNav}>Dashboard</NavLink>
+          <NavLink to="/app/profile" onClick={closeNav}>Profile & Uploads</NavLink>
+          <NavLink to="/app/jobs" onClick={closeNav}>Search Jobs</NavLink>
+          <NavLink to="/app/applications" onClick={closeNav}>Applications</NavLink>
+          <NavLink to="/app/automation" onClick={closeNav}>Automation</NavLink>
+          <NavLink to="/app/billing" onClick={closeNav}>Plan & Billing</NavLink>
+          <NavLink to="/app/settings" onClick={closeNav}>Settings</NavLink>
+          <NavLink to="/app/feedback" onClick={closeNav}>Feedback</NavLink>
+          {user.role === 'admin' && <NavLink to="/app/admin" onClick={closeNav}>Admin</NavLink>}
           <div style={{ marginTop: 'auto', paddingTop: '1rem' }}>
-            <button
-              type="button"
+            <HelpButton
               className="btn-secondary theme-toggle"
               style={{ width: '100%', marginBottom: '0.5rem' }}
               onClick={toggleTheme}
+              title="Theme"
+              help="Switch between dark and light mode. Dark mode uses soft pastel accents that are easier on the eyes."
             >
               {theme === 'dark' ? '☀ Light mode' : '☾ Dark mode'}
-            </button>
+            </HelpButton>
             <PlanBadge />
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.4rem 0' }}>
               {user.email}
             </div>
-            <button className="btn-secondary" style={{ width: '100%' }} onClick={logout}>
+            <HelpButton
+              className="btn-secondary"
+              style={{ width: '100%' }}
+              onClick={logout}
+              title="Log out"
+              help="Sign out of your account on this device. Your data stays saved for next time you log in."
+            >
               Log out
-            </button>
+            </HelpButton>
           </div>
         </nav>
         <main className="main">

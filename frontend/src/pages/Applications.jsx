@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import JobDescription from '../components/JobDescription'
+import HelpButton from '../components/HelpButton'
 import { useProfile } from '../ProfileContext'
 
 const STATUS_OPTIONS = ['', 'discovered', 'tailored', 'applied', 'follow_up_sent', 'interview', 'rejected', 'replied']
@@ -174,15 +175,27 @@ export default function Applications() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-        <h2 className="page-title">Applications</h2>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button className="btn-secondary" onClick={handleBulkTailor} disabled={busy === 'bulk'}>
+      <div className="page-header-row">
+        <h2 className="page-title" style={{ marginBottom: 0 }}>Applications</h2>
+        <div className="page-header-actions">
+          <HelpButton
+            className="btn-secondary"
+            onClick={handleBulkTailor}
+            disabled={busy === 'bulk'}
+            title="Tailor All Discovered"
+            help="Generates tailored CV and cover letter for every job still in “discovered” status — run this before sending outreach in bulk."
+          >
             Tailor All Discovered
-          </button>
-          <button className="btn-danger" onClick={handleClearAll} disabled={busy === 'clear' || applications.length === 0}>
+          </HelpButton>
+          <HelpButton
+            className="btn-danger"
+            onClick={handleClearAll}
+            disabled={busy === 'clear' || applications.length === 0}
+            title="Remove All Jobs"
+            help="Permanently deletes every saved application from your list. This cannot be undone."
+          >
             {busy === 'clear' ? 'Clearing…' : 'Remove All Jobs'}
-          </button>
+          </HelpButton>
         </div>
       </div>
       <p className="page-subtitle">Manage job applications, send outreach, and track follow-ups</p>
@@ -236,43 +249,95 @@ export default function Applications() {
               </div>
               <div className="job-actions">
                 {app.status === 'discovered' && (
-                  <button className="btn-secondary" disabled={busy === app.id} onClick={() => handleAction('tailor', app.id)}>
+                  <HelpButton
+                    className="btn-secondary"
+                    disabled={busy === app.id}
+                    onClick={() => handleAction('tailor', app.id)}
+                    title="Tailor Docs"
+                    help="AI rewrites your CV bullets and cover letter to match this specific job before you reach out."
+                  >
                     Tailor Docs
-                  </button>
+                  </HelpButton>
                 )}
                 {app.status === 'tailored' && (
                   <>
-                    <button className="btn-secondary" disabled={busy === app.id} onClick={() => handleAction('dry-run', app.id)}>
+                    <HelpButton
+                      className="btn-secondary"
+                      disabled={busy === app.id}
+                      onClick={() => handleAction('dry-run', app.id)}
+                      title="Preview Email"
+                      help="Shows the outreach email that would be sent — nothing is delivered until you confirm."
+                    >
                       Preview Email
-                    </button>
-                    <button className="btn-secondary" disabled={busy === app.id} onClick={() => handleAction('test', app.id)}>
+                    </HelpButton>
+                    <HelpButton
+                      className="btn-secondary"
+                      disabled={busy === app.id}
+                      onClick={() => handleAction('test', app.id)}
+                      title="Send Test to Me"
+                      help="Sends a copy of the outreach email to your own inbox so you can review formatting and tone."
+                    >
                       Send Test to Me
-                    </button>
-                    <button className="btn-primary" disabled={busy === app.id} onClick={() => handleAction('send', app.id)}>
+                    </HelpButton>
+                    <HelpButton
+                      className="btn-primary"
+                      disabled={busy === app.id}
+                      onClick={() => handleAction('send', app.id)}
+                      title="Send Outreach"
+                      help="Finds recruiter contacts and sends your tailored application email to the company."
+                    >
                       Send Outreach
-                    </button>
+                    </HelpButton>
                   </>
                 )}
                 {app.job?.description && (
-                  <button className="btn-secondary" onClick={() => setExpandedDesc(expandedDesc === app.id ? null : app.id)}>
+                  <HelpButton
+                    className="btn-secondary"
+                    onClick={() => setExpandedDesc(expandedDesc === app.id ? null : app.id)}
+                    title="View Description"
+                    help="Expand the full job posting text here without leaving the app."
+                  >
                     {expandedDesc === app.id ? 'Hide Description' : 'View Description'}
-                  </button>
+                  </HelpButton>
                 )}
                 {app.analysis_json && (
-                  <button className="btn-secondary" onClick={() => setExpandedAnalysis(expandedAnalysis === app.id ? null : app.id)}>
+                  <HelpButton
+                    className="btn-secondary"
+                    onClick={() => setExpandedAnalysis(expandedAnalysis === app.id ? null : app.id)}
+                    title="View Analysis"
+                    help="See how well your CV matches this role — score breakdown, gaps, and red flags from AI."
+                  >
                     {expandedAnalysis === app.id ? 'Hide Analysis' : 'View Analysis'}
-                  </button>
+                  </HelpButton>
                 )}
-                <button className="btn-secondary" disabled={loadingContacts === app.id} onClick={() => toggleContacts(app.id)}>
+                <HelpButton
+                  className="btn-secondary"
+                  disabled={loadingContacts === app.id}
+                  onClick={() => toggleContacts(app.id)}
+                  title="Find Contacts"
+                  help="Looks up hiring managers and recruiters at this company so you know who receives outreach."
+                >
                   {expandedContacts === app.id ? 'Hide Contacts' : 'Find Contacts'}
-                </button>
-                <button className="btn-secondary" disabled={busy === app.id} onClick={() => toggleEmails(app.id)}>
+                </HelpButton>
+                <HelpButton
+                  className="btn-secondary"
+                  disabled={busy === app.id}
+                  onClick={() => toggleEmails(app.id)}
+                  title="View Emails"
+                  help="Shows every email sent or drafted for this application, including subjects and full bodies."
+                >
                   {expandedEmails === app.id ? 'Hide Emails' : 'View Emails'}
-                </button>
+                </HelpButton>
                 {(app.status === 'applied' || app.status === 'follow_up_sent') && (
-                  <button className="btn-secondary" disabled={busy === app.id} onClick={() => handleAction('follow-up', app.id)}>
+                  <HelpButton
+                    className="btn-secondary"
+                    disabled={busy === app.id}
+                    onClick={() => handleAction('follow-up', app.id)}
+                    title="Log Follow-up"
+                    help="Records that you sent a follow-up and schedules the next reminder if needed."
+                  >
                     Log Follow-up
-                  </button>
+                  </HelpButton>
                 )}
                 <select
                   value={app.status}

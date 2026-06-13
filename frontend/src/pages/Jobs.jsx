@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import SearchCriteriaPanel, { SEARCH_CRITERIA_KEY } from '../components/SearchCriteriaPanel'
+import HelpButton from '../components/HelpButton'
 import { POSTED_OPTIONS, SENIORITY_OPTIONS } from '../constants/search'
 import { useProfile } from '../ProfileContext'
 
@@ -252,12 +253,24 @@ export default function Jobs() {
               onChange={(e) => setImportUrl(e.target.value)}
             />
           </div>
-          <button className="btn-primary" onClick={handleFetch} disabled={importing}>
+          <HelpButton
+            className="btn-primary"
+            onClick={handleFetch}
+            disabled={importing}
+            title="Fetch details"
+            help="Reads the job posting URL and fills in title, company, location, and description automatically when the site allows it."
+          >
             {importing ? 'Fetching…' : 'Fetch details'}
-          </button>
-          <button className="btn-secondary" onClick={handleManualEntry} disabled={importing}>
+          </HelpButton>
+          <HelpButton
+            className="btn-secondary"
+            onClick={handleManualEntry}
+            disabled={importing}
+            title="Enter manually"
+            help="Skip automatic scraping and type the job details yourself — useful when a site blocks our reader."
+          >
             Enter manually
-          </button>
+          </HelpButton>
         </div>
 
         {importMsg && (
@@ -321,12 +334,24 @@ export default function Jobs() {
               />
             </div>
             <div style={{ display: 'flex', gap: '0.6rem' }}>
-              <button className="btn-primary" onClick={handleAddJob} disabled={addingJob}>
+              <HelpButton
+                className="btn-primary"
+                onClick={handleAddJob}
+                disabled={addingJob}
+                title="Add Job"
+                help="Saves this job to your Applications list so you can tailor documents and send outreach."
+              >
                 {addingJob ? 'Adding…' : 'Add Job'}
-              </button>
-              <button className="btn-secondary" onClick={() => { setJobForm(null); setImportMsg(null) }} disabled={addingJob}>
+              </HelpButton>
+              <HelpButton
+                className="btn-secondary"
+                onClick={() => { setJobForm(null); setImportMsg(null) }}
+                disabled={addingJob}
+                title="Cancel"
+                help="Discard the form without saving this job."
+              >
                 Cancel
-              </button>
+              </HelpButton>
             </div>
           </div>
         )}
@@ -336,9 +361,16 @@ export default function Jobs() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
           <h3 style={{ margin: 0 }}>Filters</h3>
           {canSuggest && (
-            <button type="button" className="btn-secondary" onClick={suggestCriteria} disabled={suggesting}>
+            <HelpButton
+              type="button"
+              className="btn-secondary"
+              onClick={suggestCriteria}
+              disabled={suggesting}
+              title="Suggest criteria from CV"
+              help="AI reads your CV and cover letter to recommend roles, locations, seniority levels, and salary filters tailored to you."
+            >
               {suggesting ? 'Analyzing…' : 'Suggest criteria from CV'}
-            </button>
+            </HelpButton>
           )}
         </div>
 
@@ -435,9 +467,15 @@ export default function Jobs() {
           Sources: LinkedIn, RemoteOK, Remotive, We Work Remotely, Relocate.me. US roles are excluded.
         </small>
 
-        <button className="btn-primary" onClick={handleSearch} disabled={searching}>
+        <HelpButton
+          className="btn-primary"
+          onClick={handleSearch}
+          disabled={searching}
+          title="Start Job Search"
+          help="Runs a search across LinkedIn, RemoteOK, Remotive, and more. Up to 100 best matches are ranked against your CV and saved to Applications."
+        >
           {searching ? 'Searching... (this may take a minute)' : 'Start Job Search'}
-        </button>
+        </HelpButton>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}

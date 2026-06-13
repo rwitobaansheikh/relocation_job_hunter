@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useProfile } from '../ProfileContext'
+import HelpButton from '../components/HelpButton'
 
 export default function Dashboard() {
   const { profile, loading } = useProfile()
   const [stats, setStats] = useState(null)
   const [billing, setBilling] = useState(null)
+  const navigate = useNavigate()
 
   useEffect(() => {
     if (profile?.id) {
@@ -22,7 +24,14 @@ export default function Dashboard() {
       <div className="empty-state">
         <h2 className="page-title">Welcome to Job Application Flow</h2>
         <p className="page-subtitle">Complete your profile to get started</p>
-        <Link to="/app/profile"><button className="btn-primary">Set Up Profile</button></Link>
+        <HelpButton
+          className="btn-primary"
+          onClick={() => navigate('/app/profile')}
+          title="Set Up Profile"
+          help="Create your profile with CV, cover letter, and target roles so the app can search and tailor applications for you."
+        >
+          Set Up Profile
+        </HelpButton>
       </div>
     )
   }
@@ -47,9 +56,33 @@ export default function Dashboard() {
         <div className="card">
           <h3 style={{ marginBottom: '0.8rem' }}>Quick Actions</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <Link to="/app/jobs"><button className="btn-primary" style={{ width: '100%' }}>Search New Jobs</button></Link>
-            <Link to="/app/applications"><button className="btn-secondary" style={{ width: '100%' }}>View Applications</button></Link>
-            <Link to="/app/profile"><button className="btn-secondary" style={{ width: '100%' }}>Update Profile</button></Link>
+            <HelpButton
+              className="btn-primary"
+              style={{ width: '100%' }}
+              onClick={() => navigate('/app/jobs')}
+              title="Search New Jobs"
+              help="Open the job search page to find up to 100 matching roles from multiple boards, filtered by your CV and preferences."
+            >
+              Search New Jobs
+            </HelpButton>
+            <HelpButton
+              className="btn-secondary"
+              style={{ width: '100%' }}
+              onClick={() => navigate('/app/applications')}
+              title="View Applications"
+              help="See every job you've saved, tailor documents, preview emails, and send outreach from one place."
+            >
+              View Applications
+            </HelpButton>
+            <HelpButton
+              className="btn-secondary"
+              style={{ width: '100%' }}
+              onClick={() => navigate('/app/profile')}
+              title="Update Profile"
+              help="Edit your name, skills, target roles, countries, and re-upload your CV or cover letter."
+            >
+              Update Profile
+            </HelpButton>
           </div>
         </div>
         <div className="card">

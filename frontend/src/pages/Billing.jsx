@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import HelpButton from '../components/HelpButton'
 
 export default function Billing() {
   const [data, setData] = useState(null)
@@ -85,9 +86,15 @@ export default function Billing() {
         </div>
         {hasSubscription && (
           <div style={{ marginTop: '1rem' }}>
-            <button className="btn-secondary" onClick={manage} disabled={busy === 'portal'}>
+            <HelpButton
+              className="btn-secondary"
+              onClick={manage}
+              disabled={busy === 'portal'}
+              title="Manage subscription"
+              help="Opens the Stripe customer portal where you can update payment method, change plan, or cancel."
+            >
               {busy === 'portal' ? 'Opening…' : 'Manage subscription'}
-            </button>
+            </HelpButton>
           </div>
         )}
         {!data.stripe_configured && (
@@ -114,14 +121,18 @@ export default function Billing() {
               <ul className="pricing-features">
                 {t.features.map((f, i) => <li key={i}>{f}</li>)}
               </ul>
-              <button
+              <HelpButton
                 className={isCurrent ? 'btn-secondary' : 'btn-primary'}
                 style={{ width: '100%' }}
                 disabled={busy === t.id || isCurrent || !data.stripe_configured}
                 onClick={() => subscribe(t.id)}
+                title={isCurrent ? 'Current plan' : `Choose ${t.name}`}
+                help={isCurrent
+                  ? 'You are already on this plan.'
+                  : `Subscribe to ${t.name} — unlock more daily applications and automation loops. You'll be redirected to secure checkout.`}
               >
                 {isCurrent ? 'Current plan' : busy === t.id ? 'Redirecting…' : `Choose ${t.name}`}
-              </button>
+              </HelpButton>
             </div>
           )
         })}

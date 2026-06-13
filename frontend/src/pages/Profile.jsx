@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import SearchCriteriaPanel, { saveSearchCriteriaForJobs } from '../components/SearchCriteriaPanel'
+import HelpButton from '../components/HelpButton'
 import { useProfile } from '../ProfileContext'
 
 function parseCsv(csv) {
@@ -224,14 +225,16 @@ export default function Profile() {
 
           {canSuggest && (
             <div className="role-suggest-box">
-              <button
+              <HelpButton
                 type="button"
                 className="btn-secondary"
                 onClick={viewSuggestedCriteria}
                 disabled={suggesting}
+                title="View suggested search criteria"
+                help="AI analyzes your CV and cover letter to recommend target roles, countries, seniority, and filters you can apply to your profile or job search."
               >
                 {suggesting ? 'Analyzing documents…' : 'View suggested search criteria'}
-              </button>
+              </HelpButton>
               <p className="muted" style={{ marginTop: '0.5rem', fontSize: '0.82rem' }}>
                 AI recommends roles, locations, seniority and filters tuned for maximum relevant results.
               </p>
@@ -262,9 +265,15 @@ export default function Profile() {
             <label>Summary</label>
             <textarea name="summary" rows={3} value={form.summary} onChange={handleChange} />
           </div>
-          <button className="btn-primary" onClick={handleSave} disabled={saving}>
+          <HelpButton
+            className="btn-primary"
+            onClick={handleSave}
+            disabled={saving}
+            title="Save Profile"
+            help="Saves your profile details. Job search and tailoring use this information to match you with the right roles."
+          >
             {saving ? 'Saving...' : 'Save Profile'}
-          </button>
+          </HelpButton>
         </div>
 
         <div>
