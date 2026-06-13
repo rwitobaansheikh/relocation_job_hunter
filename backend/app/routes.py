@@ -48,6 +48,7 @@ from app.schemas import (
     SearchCriteriaSuggestResponse,
     SearchStatsResponse,
     SENIORITY_LEVELS,
+    WORK_TYPES,
     SendOutreachRequest,
     SettingsResponse,
     SettingsUpdate,
@@ -369,12 +370,13 @@ async def search_jobs(
         max_salary=request.max_salary,
         locations=request.locations,
         roles=[r.strip() for r in request.roles if r and r.strip()],
+        work_types=[wt for wt in request.work_types if wt in WORK_TYPES],
     )
     try:
         stats = await service.search_jobs(db, profile.id, request.max_jobs, filters)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    return SearchStatsResponse(**stats)
+    return SearchStatsResponse(jobs_stored=stats["jobs_stored"])
 
 
 # --------------------------------------------------------------------------- #

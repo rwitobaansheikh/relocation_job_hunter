@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import SearchCriteriaPanel, { SEARCH_CRITERIA_KEY } from '../components/SearchCriteriaPanel'
 import HelpButton from '../components/HelpButton'
-import { POSTED_OPTIONS, SENIORITY_OPTIONS } from '../constants/search'
+import { POSTED_OPTIONS, SENIORITY_OPTIONS, WORK_TYPE_OPTIONS } from '../constants/search'
 import { useProfile } from '../ProfileContext'
 
 export default function Jobs() {
@@ -13,6 +13,7 @@ export default function Jobs() {
   const [criteriaMsg, setCriteriaMsg] = useState(null)
 
   const [seniority, setSeniority] = useState(['intern', 'entry'])
+  const [workTypes, setWorkTypes] = useState([])
   const [postedWithin, setPostedWithin] = useState(48)
   const [minSalary, setMinSalary] = useState('')
   const [maxSalary, setMaxSalary] = useState('')
@@ -145,6 +146,12 @@ export default function Jobs() {
     )
   }
 
+  const toggleWorkType = (value) => {
+    setWorkTypes((prev) =>
+      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]
+    )
+  }
+
   const initSelection = (data) => {
     setSelectedRoles(new Set(data.roles || []))
     setSelectedLocations(new Set(data.locations || []))
@@ -212,6 +219,7 @@ export default function Jobs() {
           .split(',')
           .map((l) => l.trim())
           .filter(Boolean),
+        work_types: workTypes,
       }
       if (searchRoles.length) payload.roles = searchRoles
       if (minSalary) payload.min_salary = Number(minSalary)
@@ -234,7 +242,7 @@ export default function Jobs() {
     <div>
       <h2 className="page-title">Search Jobs</h2>
       <p className="page-subtitle">
-        Tune the filters below, then pull up to 100 matching roles ranked against your CV.
+        Set your filters and search for matching roles.
       </p>
 
       <div className="card" style={{ marginBottom: '2rem' }}>
@@ -399,6 +407,22 @@ export default function Jobs() {
         )}
 
         <div className="form-group">
+          <label>Work type</label>
+          <div className="checkbox-row">
+            {WORK_TYPE_OPTIONS.map((opt) => (
+              <label key={opt.value} className="checkbox-pill">
+                <input
+                  type="checkbox"
+                  checked={workTypes.includes(opt.value)}
+                  onChange={() => toggleWorkType(opt.value)}
+                />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="form-group">
           <label>Seniority level</label>
           <div className="checkbox-row">
             {SENIORITY_OPTIONS.map((opt) => (
@@ -412,9 +436,6 @@ export default function Jobs() {
               </label>
             ))}
           </div>
-          <small style={{ color: 'var(--text-muted)' }}>
-            Leave all unchecked to skip the seniority filter. Higher levels are excluded when intern/entry is selected.
-          </small>
         </div>
 
         <div className="filter-grid">
@@ -462,11 +483,6 @@ export default function Jobs() {
           />
         </div>
 
-        <small style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '1rem' }}>
-          Salary filtering is best-effort: most listings don't publish pay, and those roles are kept.
-          Sources: LinkedIn, RemoteOK, Remotive, We Work Remotely, Relocate.me. US roles are excluded.
-        </small>
-
         <HelpButton
           className="btn-primary"
           onClick={handleSearch}
@@ -482,19 +498,9 @@ export default function Jobs() {
 
       {results && (
         <div className="card">
-          <h3 style={{ marginBottom: '1rem' }}>Search Results</h3>
-          <div className="stats-grid">
-            <div className="stat-card"><div className="value">{results.jobs_found}</div><div className="label">Total Found</div></div>
-            <div className="stat-card"><div className="value">{results.jobs_filtered_excluded}</div><div className="label">US / Excluded</div></div>
-            <div className="stat-card"><div className="value">{results.jobs_filtered_age}</div><div className="label">Filtered (Age)</div></div>
-            <div className="stat-card"><div className="value">{results.jobs_filtered_experience}</div><div className="label">Wrong Level</div></div>
-            <div className="stat-card"><div className="value">{results.jobs_filtered_role}</div><div className="label">Off-Role</div></div>
-            <div className="stat-card"><div className="value">{results.jobs_filtered_country}</div><div className="label">Off-Location</div></div>
-            <div className="stat-card"><div className="value">{results.jobs_filtered_salary ?? 0}</div><div className="label">Below Salary</div></div>
-            <div className="stat-card"><div className="value">{results.jobs_stored}</div><div className="label">New Jobs Saved</div></div>
-          </div>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-            View saved jobs in the <a href="/app/applications">Applications</a> page to read full descriptions, tailor documents and send outreach.
+          <p style={{ fontSize: '1.05rem', marginBottom: '0.6rem' }}>
+            <strong>{results.jobs_stored}</strong> new {results.jobs_stored === 1 ? 'job' : 'jobs'} added to{' '}
+            <a href="/app/applications">Applications</a>.
           </p>
         </div>
       )}

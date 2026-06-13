@@ -6,6 +6,12 @@ export const SENIORITY_OPTIONS = [
   { value: 'executive', label: 'Executive' },
 ]
 
+export const WORK_TYPE_OPTIONS = [
+  { value: 'remote', label: 'Remote' },
+  { value: 'hybrid', label: 'Hybrid' },
+  { value: 'onsite', label: 'On-Site' },
+]
+
 export const POSTED_OPTIONS = [
   { value: 24, label: 'Last 24 hours' },
   { value: 48, label: 'Last 48 hours' },

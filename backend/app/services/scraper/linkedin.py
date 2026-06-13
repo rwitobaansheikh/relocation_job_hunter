@@ -1,16 +1,15 @@
 """LinkedIn public/guest job-search scraper.
 
 Ported from an n8n workflow. The flow is:
-  1. Build a LinkedIn guest job-search query from the profile's target roles
-     (keywords), target countries (location), the early-career experience codes,
-     and the 48h freshness window (f_TPR=r{seconds}).
-  2. Parse the returned job cards into (job_id, title, company, location, date).
+  1. Build a LinkedIn search query from UI filters (roles, locations, seniority,
+     recency, salary, work type, easy apply) via linkedin_query.py.
+  2. Fetch job cards from the guest search API (primary) or public search page
+     (fallback) using the n8n-style URL/params.
   3. Fetch each posting's guest detail page for the full description.
 
 Notes / caveats:
-  - This hits LinkedIn's unauthenticated `jobs-guest` endpoints (the same ones
-    the public "see more jobs" pager uses). No login/cookies are required, but
-    LinkedIn rate-limits aggressively, so requests are bounded and throttled.
+  - Hits LinkedIn's unauthenticated guest endpoints. No login required, but
+    LinkedIn rate-limits aggressively — requests are bounded and throttled.
   - Scraping LinkedIn may conflict with their Terms of Service; use responsibly.
 """
 
@@ -19,11 +18,18 @@ import logging
 import re
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
 
 from app.services.scraper.base import RawJob
+from app.services.scraper.linkedin_query import (
+    GUEST_SEARCH_URL,
+    PUBLIC_SEARCH_URL,
+    build_linkedin_search_params,
+    build_linkedin_search_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,15 +41,13 @@ _USER_AGENT = (
 
 class LinkedInScraper:
     source_name = "linkedin"
-    search_url = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
+    search_url = GUEST_SEARCH_URL
+    public_search_url = PUBLIC_SEARCH_URL
     detail_url = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
 
-    # f_E experience codes: 1 = Internship, 2 = Entry level, 3 = Associate.
-    # These map onto the app's allowed intern / junior / graduate levels.
+    # Default f_E when UI leaves seniority unchecked: intern + entry + associate.
     EXPERIENCE_CODES = "1,2,3"
 
-    # Bound the request fan-out so we don't hammer LinkedIn. LinkedIn is the
-    # primary source, so these are generous; each page returns ~25 cards.
     MAX_ROLES = 5
     MAX_LOCATIONS = 5
     PAGES_PER_QUERY = 4
@@ -57,11 +61,12 @@ class LinkedInScraper:
         age_hours: int = 48,
         experience_codes: Optional[str] = None,
         salary_bucket: Optional[str] = None,
+        work_type_codes: Optional[list[str]] = None,
     ) -> list[RawJob]:
         role_terms = [r for r in (roles or []) if r][: self.MAX_ROLES] or [""]
         location_terms = [loc for loc in (locations or []) if loc][: self.MAX_LOCATIONS] or [""]
-        seconds = max(int(age_hours), 1) * 3600
         fe_codes = experience_codes or self.EXPERIENCE_CODES
+        wt_codes = work_type_codes or None
 
         cards: dict[str, dict] = {}
         async with httpx.AsyncClient(
@@ -78,18 +83,23 @@ class LinkedInScraper:
                             break
                         start = page * self.PAGE_SIZE
                         found = await self._search(
-                            client, role, location, seconds, start, fe_codes, salary_bucket
+                            client,
+                            keywords=role,
+                            location=location,
+                            age_hours=age_hours,
+                            start=start,
+                            experience_codes=fe_codes,
+                            salary_bucket=salary_bucket,
+                            work_type_codes=wt_codes,
                         )
                         if not found:
-                            break  # no more results for this query
+                            break
                         for card in found:
                             if card["job_id"] and card["job_id"] not in cards:
                                 cards[card["job_id"]] = card
 
             selected = list(cards.values())[:limit]
 
-            # Fetch descriptions with limited concurrency + a small delay so we
-            # stay polite and reduce the chance of being rate-limited.
             semaphore = asyncio.Semaphore(4)
 
             async def enrich(card: dict) -> None:
@@ -122,31 +132,79 @@ class LinkedInScraper:
         client: httpx.AsyncClient,
         keywords: str,
         location: str,
-        seconds: int,
+        age_hours: int,
         start: int = 0,
-        fe_codes: Optional[str] = None,
+        experience_codes: Optional[str] = None,
         salary_bucket: Optional[str] = None,
+        work_type_codes: Optional[list[str]] = None,
     ) -> list[dict]:
-        params: dict[str, object] = {
-            "f_TPR": f"r{seconds}",
-            "f_E": fe_codes or self.EXPERIENCE_CODES,
-            "start": start,
-        }
-        if salary_bucket:
-            params["f_SB2"] = salary_bucket
-        if keywords:
-            params["keywords"] = keywords
-        if location:
-            params["location"] = location
+        params = build_linkedin_search_params(
+            keywords=keywords,
+            location=location,
+            age_hours=age_hours,
+            experience_codes=experience_codes,
+            work_type_codes=work_type_codes,
+            salary_bucket=salary_bucket,
+            start=start,
+        )
 
+        results = await self._search_guest_api(client, params)
+        if not results:
+            results = await self._search_public_page(client, params)
+        return results
+
+    async def _search_guest_api(
+        self, client: httpx.AsyncClient, params: dict[str, str]
+    ) -> list[dict]:
         try:
             response = await client.get(self.search_url, params=params)
             response.raise_for_status()
         except Exception as exc:
-            logger.warning("LinkedIn search failed (kw=%r loc=%r): %s", keywords, location, exc)
+            logger.warning(
+                "LinkedIn guest search failed (params=%s): %s", params, exc
+            )
+            return []
+
+        return self._parse_result_cards(response.text)
+
+    async def _search_public_page(
+        self, client: httpx.AsyncClient, params: dict[str, str]
+    ) -> list[dict]:
+        """Fallback: fetch the public search page (n8n HTML extraction path)."""
+        url = build_linkedin_search_url(params)
+        try:
+            response = await client.get(url)
+            response.raise_for_status()
+        except Exception as exc:
+            logger.warning("LinkedIn public search failed (%s): %s", url, exc)
             return []
 
         soup = BeautifulSoup(response.text, "lxml")
+        results: list[dict] = []
+        for link_el in soup.select(
+            'ul.jobs-search__results-list li div a[class*="base-card"]'
+        ):
+            href = (link_el.get("href") or "").strip()
+            if not href:
+                continue
+            full_url = urljoin(self.public_search_url, href)
+            job_id = self._job_id_from_url(full_url)
+            if not job_id:
+                continue
+            results.append(
+                {
+                    "job_id": job_id,
+                    "url": full_url.split("?")[0],
+                    "title": link_el.get_text(strip=True) or "",
+                    "company": "",
+                    "location": "",
+                    "posted_at": None,
+                }
+            )
+        return results
+
+    def _parse_result_cards(self, html: str) -> list[dict]:
+        soup = BeautifulSoup(html, "lxml")
         results: list[dict] = []
         for li in soup.select("li"):
             card = li.select_one("div.base-card") or li.select_one("div[class*='base-card']")
@@ -159,12 +217,12 @@ class LinkedInScraper:
             if match:
                 job_id = match.group(1)
 
-            link_el = li.select_one("a.base-card__full-link") or li.select_one("a[class*='base-card']")
+            link_el = li.select_one("a.base-card__full-link") or li.select_one(
+                "a[class*='base-card']"
+            )
             url = (link_el.get("href") if link_el else "") or ""
-            if not job_id and url:
-                url_match = re.search(r"/jobs/view/(\d+)", url)
-                if url_match:
-                    job_id = url_match.group(1)
+            if not job_id:
+                job_id = self._job_id_from_url(url)
             if not job_id:
                 continue
 
@@ -193,6 +251,11 @@ class LinkedInScraper:
                 }
             )
         return results
+
+    @staticmethod
+    def _job_id_from_url(url: str) -> str:
+        match = re.search(r"/jobs/view/(\d+)", url or "")
+        return match.group(1) if match else ""
 
     async def _fetch_description(self, client: httpx.AsyncClient, job_id: str) -> str:
         try:

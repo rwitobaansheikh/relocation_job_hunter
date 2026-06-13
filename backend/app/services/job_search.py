@@ -17,6 +17,10 @@ from app.services.scraper.base import (
     parse_salary,
     salary_to_fe_bucket,
 )
+from app.services.scraper.linkedin_query import (
+    resolve_work_type_codes,
+    split_locations,
+)
 from app.services.scraper.linkedin import LinkedInScraper
 from app.services.scraper.relocateme import RelocateMeScraper
 from app.services.scraper.remotive import RemotiveScraper
@@ -39,6 +43,8 @@ class SearchFilters:
     # Overrides the profile's target_roles for this search when provided
     # (used by per-role automation loops).
     roles: list[str] = field(default_factory=list)
+    # LinkedIn f_WT work-type filters: remote, hybrid, onsite.
+    work_types: list[str] = field(default_factory=list)
 
     def experience_codes(self) -> Optional[str]:
         codes: list[str] = []
@@ -47,6 +53,14 @@ class SearchFilters:
         if not codes:
             return None
         return ",".join(sorted(set(codes), key=int))
+
+    def linkedin_locations(self) -> list[str]:
+        """Geographic locations for LinkedIn (work-type tokens stripped)."""
+        geo, _ = split_locations(self.locations)
+        return geo
+
+    def linkedin_work_type_codes(self) -> list[str]:
+        return resolve_work_type_codes(self.work_types, self.locations)
 
 
 class JobSearchService:
@@ -89,12 +103,18 @@ class JobSearchService:
         else:
             locations = [c.strip() for c in (profile.target_countries or "").split(",") if c.strip()]
 
+        linkedin_locations = filters.linkedin_locations() or locations
+        linkedin_geo = split_locations(linkedin_locations)[0]
+        if not linkedin_geo:
+            linkedin_geo = [""]
+
         raw_jobs = await self._fetch_all(
             roles,
-            locations,
+            linkedin_geo,
             age_hours,
             experience_codes=filters.experience_codes(),
             salary_bucket=salary_to_fe_bucket(filters.min_salary),
+            work_type_codes=filters.linkedin_work_type_codes(),
         )
         stats = {
             "jobs_found": len(raw_jobs),
@@ -222,13 +242,11 @@ class JobSearchService:
         age_hours: int = 48,
         experience_codes: Optional[str] = None,
         salary_bucket: Optional[str] = None,
+        work_type_codes: Optional[list[str]] = None,
     ) -> list[RawJob]:
         tasks = []
         for scraper in self.scrapers:
             if isinstance(scraper, LinkedInScraper):
-                # LinkedIn is the primary source: it supports server-side
-                # keyword/location/recency/level/salary filtering, so pass the
-                # full context and pull a larger share of results from it.
                 tasks.append(
                     scraper.fetch_jobs(
                         limit=120,
@@ -237,6 +255,7 @@ class JobSearchService:
                         age_hours=age_hours,
                         experience_codes=experience_codes,
                         salary_bucket=salary_bucket,
+                        work_type_codes=work_type_codes,
                     )
                 )
             else:

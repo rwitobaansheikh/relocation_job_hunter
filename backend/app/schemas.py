@@ -424,6 +424,7 @@ class OutreachEmailResponse(BaseModel):
 
 
 SENIORITY_LEVELS = ("intern", "entry", "mid", "senior", "executive")
+WORK_TYPES = ("remote", "hybrid", "onsite")
 
 
 class JobSearchRequest(BaseModel):
@@ -436,10 +437,12 @@ class JobSearchRequest(BaseModel):
     min_salary: Optional[int] = Field(default=None, ge=0)
     max_salary: Optional[int] = Field(default=None, ge=0)
     # Optional explicit locations; overrides the profile's target countries
-    # for this search when provided.
+    # for this search when provided. May include Remote / Hybrid / On-Site.
     locations: list[str] = Field(default_factory=list)
     # Optional role keywords for this search; overrides profile target_roles.
     roles: list[str] = Field(default_factory=list)
+    # LinkedIn work-type filters (remote, hybrid, onsite).
+    work_types: list[str] = Field(default_factory=list)
 
 
 class TailorDocumentsRequest(BaseModel):
@@ -459,11 +462,4 @@ class FollowUpRequest(BaseModel):
 
 
 class SearchStatsResponse(BaseModel):
-    jobs_found: int
     jobs_stored: int
-    jobs_filtered_excluded: int
-    jobs_filtered_age: int
-    jobs_filtered_experience: int
-    jobs_filtered_role: int
-    jobs_filtered_country: int
-    jobs_filtered_salary: int = 0
