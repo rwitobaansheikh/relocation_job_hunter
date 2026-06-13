@@ -62,7 +62,9 @@ function ProtectedLayout() {
         />
         <nav className={`sidebar${navOpen ? ' sidebar-open' : ''}`}>
           <div className="sidebar-header">
-            <h1>Job Application Flow</h1>
+            <h1 style={{ display: 'flex', alignItems: 'center' }}>
+              <img src="/logo-full.png" alt="Job Application Flow" style={{ height: '24px', objectFit: 'contain' }} />
+            </h1>
             <button type="button" className="sidebar-close" aria-label="Close menu" onClick={closeNav}>
               ×
             </button>

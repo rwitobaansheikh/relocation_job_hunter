@@ -38,8 +38,11 @@ export default function Register() {
         {theme === 'dark' ? '☀ Light mode' : '☾ Dark mode'}
       </button>
       <div className="auth-card card">
-        <h2>Create your account</h2>
-        <p className="page-subtitle">Start your automated job search</p>
+        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+          <img src="/logo-full.png" alt="Job Application Flow" style={{ height: '36px', objectFit: 'contain' }} />
+        </div>
+        <h2 style={{ fontSize: '1.5rem', textAlign: 'center' }}>Create your account</h2>
+        <p className="page-subtitle" style={{ textAlign: 'center', marginBottom: '1.5rem' }}>Start your automated job search</p>
         {error && <div className="alert alert-error">{error}</div>}
         <form onSubmit={submit}>
           <div className="form-group">

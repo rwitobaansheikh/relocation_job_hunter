@@ -34,8 +34,11 @@ export default function Login() {
         {theme === 'dark' ? '☀ Light mode' : '☾ Dark mode'}
       </button>
       <div className="auth-card card">
-        <h2>Welcome back</h2>
-        <p className="page-subtitle">Log in to Job Application Flow</p>
+        <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+          <img src="/logo-full.png" alt="Job Application Flow" style={{ height: '36px', objectFit: 'contain' }} />
+        </div>
+        <h2 style={{ fontSize: '1.5rem' }}>Welcome back</h2>
+        <p className="page-subtitle" style={{ textAlign: 'center', marginBottom: '1.5rem' }}>Log in to continue</p>
         {error && <div className="alert alert-error">{error}</div>}
         <form onSubmit={submit}>
           <div className="form-group">
