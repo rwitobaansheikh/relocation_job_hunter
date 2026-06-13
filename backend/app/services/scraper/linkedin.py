@@ -1,17 +1,4 @@
-"""LinkedIn public/guest job-search scraper.
-
-Ported from an n8n workflow. The flow is:
-  1. Build a LinkedIn search query from UI filters (roles, locations, seniority,
-     recency, salary, work type, easy apply) via linkedin_query.py.
-  2. Fetch job cards from the guest search API (primary) or public search page
-     (fallback) using the n8n-style URL/params.
-  3. Fetch each posting's guest detail page for the full description.
-
-Notes / caveats:
-  - Hits LinkedIn's unauthenticated guest endpoints. No login required, but
-    LinkedIn rate-limits aggressively — requests are bounded and throttled.
-  - Scraping LinkedIn may conflict with their Terms of Service; use responsibly.
-"""
+"""LinkedIn public/guest job-search scraper."""
 
 import asyncio
 import logging
@@ -45,13 +32,11 @@ class LinkedInScraper:
     public_search_url = PUBLIC_SEARCH_URL
     detail_url = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
 
-    # Default f_E when UI leaves seniority unchecked: intern + entry + associate.
-    EXPERIENCE_CODES = "1,2,3"
-
-    MAX_ROLES = 5
-    MAX_LOCATIONS = 5
+    MAX_ROLES = 8
+    MAX_LOCATIONS = 15
     PAGES_PER_QUERY = 4
     PAGE_SIZE = 25
+    MIN_PER_QUERY = 20
 
     async def fetch_jobs(
         self,
@@ -64,39 +49,47 @@ class LinkedInScraper:
         work_type_codes: Optional[list[str]] = None,
     ) -> list[RawJob]:
         role_terms = [r for r in (roles or []) if r][: self.MAX_ROLES] or [""]
-        location_terms = [loc for loc in (locations or []) if loc][: self.MAX_LOCATIONS] or [""]
-        fe_codes = experience_codes or self.EXPERIENCE_CODES
-        wt_codes = work_type_codes or None
+        location_terms = [loc for loc in (locations or []) if loc][: self.MAX_LOCATIONS]
+        if not location_terms:
+            location_terms = [""]
+
+        query_pairs = [(role, loc) for role in role_terms for loc in location_terms]
+        per_query_cap = max(
+            self.MIN_PER_QUERY,
+            limit // max(len(query_pairs), 1) + 5,
+        )
 
         cards: dict[str, dict] = {}
         async with httpx.AsyncClient(
             timeout=30.0, follow_redirects=True, headers={"User-Agent": _USER_AGENT}
         ) as client:
-            for role in role_terms:
+            for role, location in query_pairs:
                 if len(cards) >= limit:
                     break
-                for location in location_terms:
-                    if len(cards) >= limit:
+                query_count = 0
+                for page in range(self.PAGES_PER_QUERY):
+                    if len(cards) >= limit or query_count >= per_query_cap:
                         break
-                    for page in range(self.PAGES_PER_QUERY):
-                        if len(cards) >= limit:
-                            break
-                        start = page * self.PAGE_SIZE
-                        found = await self._search(
-                            client,
-                            keywords=role,
-                            location=location,
-                            age_hours=age_hours,
-                            start=start,
-                            experience_codes=fe_codes,
-                            salary_bucket=salary_bucket,
-                            work_type_codes=wt_codes,
-                        )
-                        if not found:
-                            break
-                        for card in found:
-                            if card["job_id"] and card["job_id"] not in cards:
-                                cards[card["job_id"]] = card
+                    start = page * self.PAGE_SIZE
+                    found = await self._search(
+                        client,
+                        keywords=role,
+                        location=location,
+                        age_hours=age_hours,
+                        start=start,
+                        experience_codes=experience_codes,
+                        salary_bucket=salary_bucket,
+                        work_type_codes=work_type_codes,
+                    )
+                    if not found:
+                        break
+                    for card in found:
+                        if card["job_id"] and card["job_id"] not in cards:
+                            card["search_location"] = location
+                            cards[card["job_id"]] = card
+                            query_count += 1
+                            if query_count >= per_query_cap:
+                                break
 
             selected = list(cards.values())[:limit]
 
@@ -123,6 +116,7 @@ class LinkedInScraper:
                     company_domain="",
                     posted_at=card.get("posted_at"),
                     tags=[],
+                    search_location=card.get("search_location") or "",
                 )
             )
         return jobs

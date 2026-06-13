@@ -12,7 +12,7 @@ export default function Jobs() {
   const [error, setError] = useState(null)
   const [criteriaMsg, setCriteriaMsg] = useState(null)
 
-  const [seniority, setSeniority] = useState(['intern', 'entry'])
+  const [seniority, setSeniority] = useState([])
   const [workTypes, setWorkTypes] = useState([])
   const [postedWithin, setPostedWithin] = useState(48)
   const [minSalary, setMinSalary] = useState('')
@@ -403,6 +403,13 @@ export default function Jobs() {
         {searchRoles.length > 0 && (
           <p className="muted" style={{ fontSize: '0.85rem', marginBottom: '1rem' }}>
             Searching roles: <strong>{searchRoles.join(', ')}</strong>
+          </p>
+        )}
+
+        {(locations.trim() || profile?.target_countries) && (
+          <p className="muted" style={{ fontSize: '0.85rem', marginBottom: '1rem' }}>
+            Locations:{' '}
+            <strong>{locations.trim() ? locations : profile.target_countries}</strong>
           </p>
         )}
 

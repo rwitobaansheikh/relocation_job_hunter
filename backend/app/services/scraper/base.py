@@ -22,6 +22,8 @@ class RawJob:
     salary_max: Optional[int] = None
     salary_currency: str = ""
     salary_text: str = ""
+    # LinkedIn query location used to find this job (for multi-location search).
+    search_location: str = ""
 
 
 RELOCATION_KEYWORDS = [
@@ -86,7 +88,8 @@ SENIORITY_KEYWORDS: list[tuple[str, list[str]]] = [
     ]),
 ]
 
-# Map a canonical seniority bucket to LinkedIn guest `f_E` experience codes.
+# All LinkedIn f_E codes — used only when the UI leaves seniority unrestricted.
+ALL_EXPERIENCE_CODES = "1,2,3,4,5,6"
 # LinkedIn: 1 Internship, 2 Entry, 3 Associate, 4 Mid-Senior, 5 Director, 6 Executive.
 LEVEL_TO_FE: dict[str, list[str]] = {
     "intern": ["1"],

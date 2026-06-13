@@ -205,6 +205,17 @@ class JobMatcher:
         if not countries:
             return True
 
+        # Jobs returned from a LinkedIn query for a specific place count as a
+        # match for that target (e.g. Germany search even if JD omits "Germany").
+        search_loc = (getattr(job, "search_location", None) or "").strip().lower()
+        if search_loc:
+            for country in countries:
+                if country == search_loc or country in search_loc or search_loc in country:
+                    return True
+                for alias in COUNTRY_ALIASES.get(country, []):
+                    if alias == search_loc or alias in search_loc or search_loc in alias:
+                        return True
+
         text = " ".join([job.location, job.description, " ".join(job.tags)]).lower()
         for country in countries:
             if country in text:
@@ -213,9 +224,31 @@ class JobMatcher:
                 if alias in text:
                     return True
 
-        # Keep remote/global roles available even if they don't name a target
-        # location (US ones are already filtered out by `is_excluded`).
         return any(signal in text for signal in GLOBAL_LOCATION_SIGNALS)
+
+    @staticmethod
+    def _cv_tokens(cv_text: str) -> set[str]:
+        if not cv_text:
+            return set()
+        stop = {
+            "and", "the", "for", "with", "from", "that", "this", "have", "your",
+            "will", "been", "were", "their", "about", "into", "using", "used",
+        }
+        tokens = re.findall(r"[a-z0-9+#.]{3,}", cv_text.lower())
+        return {t for t in tokens if t not in stop and not t.isdigit()}
+
+    def _cv_description_overlap(self, job: RawJob, profile: UserProfile) -> float:
+        """0–40 points from CV vs job-description term overlap."""
+        cv_tokens = self._cv_tokens(profile.cv_text or "")
+        if not cv_tokens:
+            return 0.0
+        desc = " ".join([job.title, job.description, job.location]).lower()
+        desc_tokens = set(re.findall(r"[a-z0-9+#.]{3,}", desc))
+        if not desc_tokens:
+            return 0.0
+        overlap = len(cv_tokens & desc_tokens)
+        ratio = overlap / max(len(cv_tokens), 1)
+        return min(40.0, ratio * 80 + overlap * 0.5)
 
     def is_excluded(self, job: RawJob) -> tuple[bool, str]:
         """Hard exclusions applied before other filters: drop US-based roles and
@@ -244,43 +277,42 @@ class JobMatcher:
         text = " ".join([job.title, job.description, " ".join(job.tags)]).lower()
         cv_text = (profile.cv_text or "").lower()
 
+        # Primary ranking signal: CV vs full job description overlap.
+        score += self._cv_description_overlap(job, profile)
+
         target_roles = [r.strip().lower() for r in (profile.target_roles or "").split(",") if r.strip()]
         for role in target_roles:
             if role in job.title.lower():
-                score += 30
+                score += 20
             elif role in text:
-                score += 15
+                score += 10
 
         target_countries = [c.strip().lower() for c in (profile.target_countries or "").split(",") if c.strip()]
         for country in target_countries:
             if country in text or country in job.location.lower():
-                score += 20
+                score += 10
 
         skills = [s.strip().lower() for s in (profile.skills or "").split(",") if s.strip()]
         for skill in skills:
             if skill in text:
-                score += 5
+                score += 4
             if skill in cv_text:
                 score += 2
 
-        skill_matches = sum(1 for skill in skills if skill in text)
-        if skills:
-            score += (skill_matches / len(skills)) * 25
-
         if job.source == "relocateme":
-            score += 15
+            score += 10
         if job.source == "linkedin":
-            score += 18
+            score += 5
 
         relocation_kw = self.check_relocation(job)[1]
         if relocation_kw:
-            score += 10
+            score += 8
 
         exp = self.detect_experience_level(job)
         if exp == "graduate":
-            score += 8
-        elif exp == "intern":
             score += 5
+        elif exp == "intern":
+            score += 3
 
         return round(min(score, 100.0), 2)
 

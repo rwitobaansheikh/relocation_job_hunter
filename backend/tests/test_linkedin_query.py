@@ -32,6 +32,12 @@ def test_build_params_matches_n8n_style_query():
     assert "keywords=Software+Engineer" in url
 
 
+def test_split_locations_extracts_work_type_only():
+    geo, wt = split_locations(["Remote", "Hybrid"])
+    assert geo == []
+    assert wt == ["2", "3"]
+
+
 def test_resolve_work_type_codes_merges_ui_and_locations():
     codes = resolve_work_type_codes(["remote"], ["Germany", "Hybrid"])
     assert codes == ["2", "3"]

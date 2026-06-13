@@ -103,8 +103,7 @@ class JobSearchService:
         else:
             locations = [c.strip() for c in (profile.target_countries or "").split(",") if c.strip()]
 
-        linkedin_locations = filters.linkedin_locations() or locations
-        linkedin_geo = split_locations(linkedin_locations)[0]
+        linkedin_geo, _ = split_locations(locations)
         if not linkedin_geo:
             linkedin_geo = [""]
 
@@ -249,7 +248,7 @@ class JobSearchService:
             if isinstance(scraper, LinkedInScraper):
                 tasks.append(
                     scraper.fetch_jobs(
-                        limit=120,
+                        limit=150,
                         roles=roles,
                         locations=locations,
                         age_hours=age_hours,
