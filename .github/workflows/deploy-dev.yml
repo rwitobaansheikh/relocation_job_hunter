@@ -133,10 +133,18 @@ jobs:
             echo "=== Dev container status ==="
             docker compose $COMPOSE ps
             echo "=== Local health check (port 8080) ==="
-            curl -fsS http://127.0.0.1:8080/health
-            echo ""
-            echo "Dev app is up on the host. If https://dev.jobapplicationflow.com shows Error 1033,"
-            echo "add a Cloudflare Tunnel public hostname: dev.jobapplicationflow.com -> http://127.0.0.1:8080"
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8080/health >/dev/null; then
+                curl -fsS http://127.0.0.1:8080/health
+                echo ""
+                echo "Dev app is up on the host."
+                exit 0
+              fi
+              sleep 2
+            done
+            echo "Dev app did not become healthy within 60s"
+            docker compose $COMPOSE ps
+            exit 1
 
       - name: Close ephemeral SSH
         if: always() && steps.ssh_access.outputs.sg_id != ''
