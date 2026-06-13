@@ -133,6 +133,7 @@ class JobSearchService:
             "jobs_filtered_role": 0,
             "jobs_filtered_country": 0,
             "jobs_filtered_salary": 0,
+            "jobs_filtered_work_type": 0,
             "jobs_stored": 0,
         }
 
@@ -178,6 +179,11 @@ class JobSearchService:
             # Constraint 5: optional salary band (best-effort).
             if not self.matcher.matches_salary(job, filters.min_salary, filters.max_salary):
                 stats["jobs_filtered_salary"] += 1
+                continue
+
+            # Constraint 6: optional work types filter.
+            if not self.matcher.matches_work_types(job, filters.work_types):
+                stats["jobs_filtered_work_type"] += 1
                 continue
 
             score = self.matcher.score_relevance(job, profile)

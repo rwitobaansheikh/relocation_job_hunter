@@ -169,6 +169,37 @@ class JobMatcher:
             return False
         return True
 
+    def matches_work_types(self, job: RawJob, work_types: list[str]) -> bool:
+        """True when the job matches the selected work types.
+        Allowed values: 'remote', 'hybrid', 'onsite'.
+        If empty, all are allowed.
+        """
+        if not work_types:
+            return True
+
+        source = job.source.lower()
+        if source == "linkedin":
+            # LinkedIn was already filtered at the API level
+            return True
+
+        # Remote-only job boards
+        if source in ("remoteok", "remotive", "weworkremotely"):
+            return "remote" in work_types
+
+        # Look for text clues in title, description, and location
+        text = " ".join([job.title, job.description, job.location, " ".join(job.tags)]).lower()
+        
+        # Check remote signals
+        if any(signal in text for signal in ("remote", "telecommute", "work from home", "wfh")):
+            if "remote" in work_types:
+                return True
+        # Check hybrid signals
+        if "hybrid" in text:
+            if "hybrid" in work_types:
+                return True
+        # Default fallback: onsite (most traditional / relocation roles)
+        return "onsite" in work_types
+
     def matches_target_role(self, job: RawJob, profile: UserProfile) -> bool:
         """True if the job matches one of the profile's target roles. When no
         target roles are set, all roles are allowed."""
