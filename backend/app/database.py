@@ -91,7 +91,7 @@ class UserProfile(Base):
     smtp_from = Column(String(200), default="")
     # Optional encrypted overrides for the otherwise-shared API keys.
     gemini_api_key_enc = Column(Text, default="")
-    hunter_api_key_enc = Column(Text, default="")
+    rocketreach_api_key_enc = Column(Text, default="")
 
     # --- Automation preferences ---
     automation_enabled = Column(Boolean, default=False)
@@ -302,7 +302,7 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "smtp_password_enc": "TEXT DEFAULT ''",
         "smtp_from": "VARCHAR(200) DEFAULT ''",
         "gemini_api_key_enc": "TEXT DEFAULT ''",
-        "hunter_api_key_enc": "TEXT DEFAULT ''",
+        "rocketreach_api_key_enc": "TEXT DEFAULT ''",
         "automation_enabled": "BOOLEAN DEFAULT 0",
         "automation_interval_hours": "INTEGER DEFAULT 12",
         "daily_send_cap": "INTEGER DEFAULT 20",

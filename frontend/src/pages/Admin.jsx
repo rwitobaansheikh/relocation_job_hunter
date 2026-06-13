@@ -81,7 +81,7 @@ export default function Admin() {
             <div className="stat-card"><div className="value">{stats.total_applications}</div><div className="label">Applications</div></div>
             <div className="stat-card"><div className="value">{stats.emails_sent_today}</div><div className="label">Emails Today</div></div>
             <div className="stat-card"><div className="value">{stats.gemini_calls_today}</div><div className="label">LLM Calls Today</div></div>
-            <div className="stat-card"><div className="value">{stats.hunter_calls_today}</div><div className="label">Hunter Calls</div></div>
+            <div className="stat-card"><div className="value">{stats.rocketreach_calls_today}</div><div className="label">RocketReach Calls</div></div>
           </div>
 
           <div className="card" style={{ marginBottom: '1.5rem' }}>

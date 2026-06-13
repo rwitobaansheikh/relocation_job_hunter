@@ -311,7 +311,7 @@ def _settings_response(profile: UserProfile) -> SettingsResponse:
         smtp_from=profile.smtp_from or "",
         smtp_password_set=bool(profile.smtp_password_enc),
         gemini_override_set=bool(profile.gemini_api_key_enc),
-        hunter_override_set=bool(profile.hunter_api_key_enc),
+        rocketreach_override_set=bool(profile.rocketreach_api_key_enc),
         automation_enabled=bool(profile.automation_enabled),
         automation_interval_hours=profile.automation_interval_hours
         or settings.default_automation_interval_hours,
@@ -344,8 +344,8 @@ def update_settings(
         profile.smtp_password_enc = encrypt_secret(payload.pop("smtp_password") or "")
     if "gemini_api_key" in payload:
         profile.gemini_api_key_enc = encrypt_secret(payload.pop("gemini_api_key") or "")
-    if "hunter_api_key" in payload:
-        profile.hunter_api_key_enc = encrypt_secret(payload.pop("hunter_api_key") or "")
+    if "rocketreach_api_key" in payload:
+        profile.rocketreach_api_key_enc = encrypt_secret(payload.pop("rocketreach_api_key") or "")
     for key, value in payload.items():
         setattr(profile, key, value)
     db.commit()

@@ -133,8 +133,8 @@ def stats(db: Session = Depends(get_db)):
         .all()
     )
     llm_calls = sum(row.count or 0 for row in llm_usage)
-    hunter = (
-        db.query(ApiUsage).filter(ApiUsage.api == "hunter", ApiUsage.day == today).first()
+    rocketreach = (
+        db.query(ApiUsage).filter(ApiUsage.api == "rocketreach", ApiUsage.day == today).first()
     )
 
     return AdminStatsResponse(
@@ -149,7 +149,7 @@ def stats(db: Session = Depends(get_db)):
         .count(),
         automation_globally_enabled=settings.automation_globally_enabled,
         gemini_calls_today=llm_calls,
-        hunter_calls_today=hunter.count if hunter else 0,
+        rocketreach_calls_today=rocketreach.count if rocketreach else 0,
         automation_users=db.query(UserProfile)
         .filter(UserProfile.automation_enabled.is_(True))
         .count(),

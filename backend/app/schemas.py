@@ -44,7 +44,7 @@ class SettingsResponse(BaseModel):
     smtp_from: str
     smtp_password_set: bool
     gemini_override_set: bool
-    hunter_override_set: bool
+    rocketreach_override_set: bool
     automation_enabled: bool
     automation_interval_hours: int
     daily_send_cap: int
@@ -60,7 +60,7 @@ class SettingsUpdate(BaseModel):
     smtp_from: Optional[str] = None
     smtp_password: Optional[str] = None  # plaintext; stored encrypted
     gemini_api_key: Optional[str] = None  # plaintext override; stored encrypted
-    hunter_api_key: Optional[str] = None  # plaintext override; stored encrypted
+    rocketreach_api_key: Optional[str] = None  # plaintext override; stored encrypted
     automation_enabled: Optional[bool] = None
     automation_interval_hours: Optional[int] = Field(default=None, ge=1, le=168)
     daily_send_cap: Optional[int] = Field(default=None, ge=0, le=200)
@@ -97,7 +97,7 @@ class AdminStatsResponse(BaseModel):
     emails_sent_today: int
     automation_globally_enabled: bool
     gemini_calls_today: int
-    hunter_calls_today: int
+    rocketreach_calls_today: int
     automation_users: int
 
 

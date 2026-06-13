@@ -18,7 +18,7 @@ const FEATURES = [
   },
   {
     title: 'Verified contact finding',
-    body: 'Finds HR and hiring contacts at each company via Hunter.io, prioritising real people over generic inboxes.',
+    body: 'Finds HR and hiring contacts at each company via RocketReach, prioritising real people over generic inboxes.',
   },
   {
     title: 'Personalised outreach',
