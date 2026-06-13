@@ -131,8 +131,7 @@ designed to return a HIGH VOLUME of relevant listings on LinkedIn and remote job
 Goals:
 1. Maximize discoverable jobs without straying from what the candidate can credibly apply for.
 2. Use multiple synonymous job titles recruiters actually post (5–8 titles).
-3. Include broad locations: always add "Remote" when suitable; add countries/cities from the CV,
-   their current location, and major markets that match their skills (6–12 locations).
+3. Include ONLY broad locations: always add "Remote" when suitable; suggest ONLY country names (e.g. 'United Kingdom', 'Germany', 'Netherlands', 'Ireland', 'United States', 'Spain', etc.). Do NOT suggest singular cities, towns, states, or regions (e.g. NEVER suggest 'London', 'Berlin', 'Dublin', 'Bath', 'Amsterdam', 'Mumbai', 'California', or 'Texas'). Recommend 5–10 countries.
 4. Set seniority_levels to match their experience (values: intern, entry, mid, senior, executive).
    Prefer slightly broader bands when it increases results (e.g. entry+mid for 2–4 years).
 5. Prefer posted_within_hours of 168 (1 week) or 336 (2 weeks) for more results unless they are

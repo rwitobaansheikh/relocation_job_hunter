@@ -76,11 +76,7 @@ class LinkedInScraper:
             global_limit + min(len(exclude), 250),
         )
         target_new = global_limit
-        per_location_target = (
-            max(JOBS_PER_LOCATION, target_new // len(location_terms))
-            if len(location_terms) >= MIN_LOCATIONS_FOR_QUOTA
-            else target_new
-        )
+        per_location_target = max(JOBS_PER_LOCATION, target_new // len(location_terms))
         pages_per_query = self.PAGES_PER_QUERY + (4 if exclude else 0)
 
         def is_new(job_id: str) -> bool:
@@ -98,15 +94,11 @@ class LinkedInScraper:
                     if card.get("search_location") == location and is_new(card["job_id"])
                 )
                 for role in role_terms:
-                    new_count = sum(1 for card in cards.values() if is_new(card["job_id"]))
-                    if new_count >= target_new:
+                    if len(cards) >= fetch_cap:
                         break
                     if location_new >= per_location_target:
                         break
                     for page in range(pages_per_query):
-                        new_count = sum(1 for card in cards.values() if is_new(card["job_id"]))
-                        if new_count >= target_new:
-                            break
                         if len(cards) >= fetch_cap:
                             break
                         if location_new >= per_location_target:
