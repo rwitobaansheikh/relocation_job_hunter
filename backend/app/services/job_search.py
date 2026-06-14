@@ -39,7 +39,7 @@ class SearchFilters:
     posted_within_hours: Optional[int] = None
     min_salary: Optional[int] = None
     max_salary: Optional[int] = None
-    locations: list[str] = field(default_factory=list)
+    location: str = ""
     # Overrides the profile's target_roles for this search when provided
     # (used by per-role automation loops).
     roles: list[str] = field(default_factory=list)
@@ -56,11 +56,11 @@ class SearchFilters:
 
     def linkedin_locations(self) -> list[str]:
         """Geographic locations for LinkedIn (work-type tokens stripped)."""
-        geo, _ = split_locations(self.locations)
+        geo, _ = split_locations([self.location] if self.location else [])
         return geo
 
     def linkedin_work_type_codes(self) -> list[str]:
-        return resolve_work_type_codes(self.work_types, self.locations)
+        return resolve_work_type_codes(self.work_types, [self.location] if self.location else [])
 
 
 class JobSearchService:
@@ -81,6 +81,78 @@ class JobSearchService:
         max_jobs: int = 100,
         filters: Optional[SearchFilters] = None,
     ) -> dict:
+        """Original synchronous-like search (used by automation loops).
+        Iterates the stream and accumulates stats."""
+        final_stats = {
+            "jobs_found": 0,
+            "jobs_stored": 0,
+            "jobs_filtered": 0,
+        }
+        async for event in self.search_jobs_stream(db, user_profile_id, max_jobs, filters):
+            if event["type"] == "done":
+                final_stats = event["stats"]
+                break
+            elif event["type"] == "job":
+                final_stats = event["stats"]
+                if final_stats["jobs_stored"] >= max_jobs:
+                    break
+        return final_stats
+
+    async def search_jobs(
+        self,
+        db: Session,
+        user_profile_id: int,
+        max_jobs: int = 100,
+        filters: Optional[SearchFilters] = None,
+    ) -> dict:
+        """Original synchronous-like search (used by automation loops).
+        Iterates the stream and accumulates stats."""
+        final_stats = {
+            "jobs_found": 0,
+            "jobs_stored": 0,
+            "jobs_filtered": 0,
+        }
+        async for event in self.search_jobs_stream(db, user_profile_id, max_jobs, filters):
+            if event["type"] == "done":
+                final_stats = event["stats"]
+                break
+            elif event["type"] == "job":
+                final_stats = event["stats"]
+                if final_stats["jobs_stored"] >= max_jobs:
+                    break
+        return final_stats
+
+    async def search_jobs(
+        self,
+        db: Session,
+        user_profile_id: int,
+        max_jobs: int = 100,
+        filters: Optional[SearchFilters] = None,
+    ) -> dict:
+        """Original synchronous-like search (used by automation loops).
+        Iterates the stream and accumulates stats."""
+        final_stats = {
+            "jobs_found": 0,
+            "jobs_stored": 0,
+            "jobs_filtered": 0,
+        }
+        async for event in self.search_jobs_stream(db, user_profile_id, max_jobs, filters):
+            if event["type"] == "done":
+                final_stats = event["stats"]
+                break
+            elif event["type"] == "job":
+                final_stats = event["stats"]
+                if final_stats["jobs_stored"] >= max_jobs:
+                    break
+        return final_stats
+
+    async def search_jobs_stream(
+        self,
+        db: Session,
+        user_profile_id: int,
+        max_jobs: int = 100,
+        filters: Optional[SearchFilters] = None,
+    ):
         profile = db.query(UserProfile).filter(UserProfile.id == user_profile_id).first()
         if not profile:
             raise ValueError(f"User profile {user_profile_id} not found")
@@ -90,16 +162,13 @@ class JobSearchService:
         age_hours = filters.posted_within_hours or settings.job_age_hours
         cutoff = datetime.utcnow() - timedelta(hours=age_hours)
 
-        # Explicit per-search roles (automation loops) take precedence over the
-        # profile's target roles when provided.
         if filters.roles:
             roles = [r.strip() for r in filters.roles if r.strip()]
         else:
             roles = [r.strip() for r in (profile.target_roles or "").split(",") if r.strip()]
-        # Explicit per-search locations take precedence over the profile's
-        # target countries when provided.
-        if filters.locations:
-            locations = [loc.strip() for loc in filters.locations if loc.strip()]
+            
+        if filters.location:
+            locations = [filters.location.strip()]
         else:
             locations = [c.strip() for c in (profile.target_countries or "").split(",") if c.strip()]
 
@@ -109,92 +178,55 @@ class JobSearchService:
 
         existing_external_ids = self._existing_external_ids(db, user_profile_id)
 
-        raw_jobs = await self._fetch_all(
-            roles,
-            linkedin_geo,
-            age_hours,
-            max_jobs=max_jobs,
-            exclude_external_ids=existing_external_ids,
+        yield {"type": "status", "message": f"Starting search for {linkedin_geo[0]}..."}
+
+        stats = {
+            "jobs_found": 0,
+            "jobs_stored": 0,
+            "jobs_filtered": 0,
+        }
+
+        linkedin_scraper = next((s for s in self.scrapers if isinstance(s, LinkedInScraper)), None)
+        if not linkedin_scraper:
+            yield {"type": "done", "stats": stats}
+            return
+
+        async for job in linkedin_scraper.fetch_jobs_stream(
+            roles=roles,
+            location=linkedin_geo[0],
+            age_hours=age_hours,
             experience_codes=filters.experience_codes(),
             salary_bucket=salary_to_fe_bucket(filters.min_salary),
             work_type_codes=filters.linkedin_work_type_codes(),
-        )
-        logger.info(
-            "Search fetched %d raw jobs (roles=%s locations=%s)",
-            len(raw_jobs),
-            roles,
-            linkedin_geo,
-        )
-        stats = {
-            "jobs_found": 0,
-            "jobs_filtered_excluded": 0,
-            "jobs_filtered_age": 0,
-            "jobs_filtered_experience": 0,
-            "jobs_filtered_role": 0,
-            "jobs_filtered_country": 0,
-            "jobs_filtered_salary": 0,
-            "jobs_filtered_work_type": 0,
-            "jobs_stored": 0,
-        }
-
-        filtered: list[tuple[RawJob, float, str, str, bool]] = []
-        for job in raw_jobs:
-            # Best-effort salary extraction so it can be filtered + displayed.
-            smin, smax, currency, salary_label = parse_salary(
-                " ".join([job.title, job.description])
-            )
+            exclude_external_ids=existing_external_ids,
+        ):
+            smin, smax, currency, salary_label = parse_salary(" ".join([job.title, job.description]))
             job.salary_min, job.salary_max = smin, smax
             job.salary_currency, job.salary_text = currency, salary_label
 
-            # Hard exclusions: US-based roles and blacklisted companies (Canonical).
-            excluded, _reason = self.matcher.is_excluded(job, filters.locations)
+            excluded, _reason = self.matcher.is_excluded(job, [filters.location] if filters.location else None)
             if excluded:
-                stats["jobs_filtered_excluded"] += 1
+                stats["jobs_filtered"] += 1
                 continue
 
-            # LinkedIn already applies f_TPR at search time; only reject when we
-            # have a posted_at that is clearly outside the window.
             if job.posted_at and job.posted_at < cutoff:
-                stats["jobs_filtered_age"] += 1
+                stats["jobs_filtered"] += 1
                 continue
 
             seniority_level = self.matcher.classify_seniority(job)
             if not self.matcher.matches_seniority(job, filters.seniority_levels):
-                stats["jobs_filtered_experience"] += 1
+                stats["jobs_filtered"] += 1
+                continue
+
+            if not self.matcher.matches_work_types(job, filters.work_types):
+                stats["jobs_filtered"] += 1
                 continue
 
             offers_relocation, relocation_kw = self.matcher.check_relocation(job)
-
-            # LinkedIn results were already fetched with role keywords — don't
-            # re-filter them with a strict text match.
-            if job.source != "linkedin" and not self.matcher.matches_roles(job, roles):
-                stats["jobs_filtered_role"] += 1
-                continue
-
-            # LinkedIn results were already fetched per location query.
-            if job.source != "linkedin" and not self.matcher.matches_locations(job, locations):
-                stats["jobs_filtered_country"] += 1
-                continue
-
-            # Constraint 5: optional salary band (best-effort).
-            if not self.matcher.matches_salary(job, filters.min_salary, filters.max_salary):
-                stats["jobs_filtered_salary"] += 1
-                continue
-
-            # Constraint 6: optional work types filter.
-            if not self.matcher.matches_work_types(job, filters.work_types):
-                stats["jobs_filtered_work_type"] += 1
-                continue
-
             score = self.matcher.score_relevance(job, profile)
-            filtered.append((job, score, seniority_level, relocation_kw, offers_relocation))
+            
+            stats["jobs_found"] += 1
 
-        filtered.sort(key=lambda x: x[1], reverse=True)
-        new_jobs = [item for item in filtered if item[0].external_id not in existing_external_ids]
-        stats["jobs_found"] = len(new_jobs)
-        top_jobs = new_jobs[:max_jobs]
-
-        for job, score, seniority_level, relocation_kw, offers_relocation in top_jobs:
             existing = db.query(Job).filter(Job.external_id == job.external_id).first()
             if existing:
                 existing.relevance_score = score
@@ -228,33 +260,25 @@ class JobSearchService:
                 db.add(job_record)
                 db.flush()
 
-            app_exists = (
-                db.query(JobApplication)
-                .filter(
-                    JobApplication.user_profile_id == user_profile_id,
-                    JobApplication.job_id == job_record.id,
-                )
-                .first()
-            )
+            app_exists = db.query(JobApplication).filter(JobApplication.user_profile_id == user_profile_id, JobApplication.job_id == job_record.id).first()
             if not app_exists:
-                db.add(
-                    JobApplication(
-                        user_profile_id=user_profile_id,
-                        job_id=job_record.id,
-                        status="discovered",
-                    )
-                )
+                db.add(JobApplication(user_profile_id=user_profile_id, job_id=job_record.id, status="discovered"))
                 stats["jobs_stored"] += 1
 
-        db.commit()
-        logger.info(
-            "Search stored %d new jobs (raw_new=%d, matched_new=%d, already_had=%d)",
-            stats["jobs_stored"],
-            len(raw_jobs),
-            len(new_jobs),
-            len(existing_external_ids),
-        )
-        return stats
+            db.commit()
+
+            yield {
+                "type": "job",
+                "job": {
+                    "title": job.title,
+                    "company": job.company,
+                    "location": job.location,
+                    "url": job.url
+                },
+                "stats": stats
+            }
+
+        yield {"type": "done", "stats": stats}
 
     @staticmethod
     def _existing_external_ids(db: Session, user_profile_id: int) -> set[str]:

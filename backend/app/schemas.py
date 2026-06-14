@@ -428,20 +428,14 @@ WORK_TYPES = ("remote", "hybrid", "onsite")
 
 
 class JobSearchRequest(BaseModel):
-    max_jobs: int = Field(default=100, le=100)
-    # Which seniority levels to include. Empty = no seniority filter.
+    max_jobs: int = Field(default=100)
     seniority_levels: list[str] = Field(default_factory=list)
-    # Freshness window in hours (e.g. 24, 48, 168, 336). Defaults to 48h.
     posted_within_hours: int = Field(default=48, ge=1, le=2160)
-    # Optional annual salary bounds (in the user's currency, best-effort).
     min_salary: Optional[int] = Field(default=None, ge=0)
     max_salary: Optional[int] = Field(default=None, ge=0)
-    # Optional explicit locations; overrides the profile's target countries
-    # for this search when provided. May include Remote / Hybrid / On-Site.
-    locations: list[str] = Field(default_factory=list)
-    # Optional role keywords for this search; overrides profile target_roles.
+    # The UI now sends one location at a time to strictly enforce location scoping.
+    location: str = ""
     roles: list[str] = Field(default_factory=list)
-    # LinkedIn work-type filters (remote, hybrid, onsite).
     work_types: list[str] = Field(default_factory=list)
 
 

@@ -69,6 +69,49 @@ export const api = {
       body: JSON.stringify({ max_jobs: 100, ...payload }),
     }),
 
+  streamSearchJobs: async (payload, onEvent) => {
+    const headers = { 'Content-Type': 'application/json' }
+    const token = localStorage.getItem('token')
+    if (token) headers['Authorization'] = `Bearer ${token}`
+
+    const response = await fetch(`${API_BASE}/jobs/search`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ max_jobs: 100, ...payload }),
+    })
+
+    if (!response.ok) {
+      const text = await response.text()
+      let msg = text
+      try { msg = JSON.parse(text).detail || text } catch (e) {}
+      throw new Error(msg)
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      
+      const lines = buffer.split('\n\n')
+      buffer = lines.pop() // keep incomplete chunk
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6))
+            onEvent(data)
+          } catch (e) {
+            console.error('Failed to parse SSE JSON:', line)
+          }
+        }
+      }
+    }
+  },
+
   importJob: (url) =>
     request('/jobs/import', { method: 'POST', body: JSON.stringify({ url }) }),
 

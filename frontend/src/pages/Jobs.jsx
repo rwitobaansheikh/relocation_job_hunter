@@ -210,22 +210,50 @@ export default function Jobs() {
     setSearching(true)
     setError(null)
     setResults(null)
+    
     try {
-      const payload = {
-        max_jobs: 100,
-        seniority_levels: seniority,
-        posted_within_hours: Number(postedWithin),
-        locations: locations
-          .split(',')
-          .map((l) => l.trim())
-          .filter(Boolean),
-        work_types: workTypes,
+      const locList = locations
+        .split(',')
+        .map((l) => l.trim())
+        .filter(Boolean)
+        
+      if (locList.length === 0) locList.push('')
+      
+      let aggregatedStats = { jobs_found: 0, jobs_stored: 0 }
+      
+      // "Constrict the filters to search for only one location per search."
+      for (const loc of locList) {
+        const payload = {
+          max_jobs: 100, // Optional constraint
+          seniority_levels: seniority,
+          posted_within_hours: Number(postedWithin),
+          location: loc,
+          work_types: workTypes,
+        }
+        if (searchRoles.length) payload.roles = searchRoles
+        if (minSalary) payload.min_salary = Number(minSalary)
+        if (maxSalary) payload.max_salary = Number(maxSalary)
+
+        await api.streamSearchJobs(payload, (event) => {
+          if (event.type === 'status') {
+            setCriteriaMsg({ type: 'info', text: event.message })
+          } else if (event.type === 'job' || event.type === 'done') {
+            if (event.stats) {
+              const currentTotal = {
+                jobs_found: aggregatedStats.jobs_found + event.stats.jobs_found,
+                jobs_stored: aggregatedStats.jobs_stored + event.stats.jobs_stored,
+              }
+              setResults(currentTotal)
+              if (event.type === 'done') {
+                aggregatedStats = currentTotal
+              }
+            }
+          } else if (event.error) {
+            console.error('Stream error:', event.error)
+          }
+        })
       }
-      if (searchRoles.length) payload.roles = searchRoles
-      if (minSalary) payload.min_salary = Number(minSalary)
-      if (maxSalary) payload.max_salary = Number(maxSalary)
-      const stats = await api.searchJobs(payload)
-      setResults(stats)
+      setCriteriaMsg({ type: 'success', text: 'Search completed. Go to Applications to view them.' })
     } catch (err) {
       setError(err.message)
     }

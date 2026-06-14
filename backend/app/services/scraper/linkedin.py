@@ -52,17 +52,79 @@ class LinkedInScraper:
     PAGE_SIZE = 25
     MAX_RETRIES = 3
 
-    async def fetch_jobs(
+    async def fetch_jobs_stream(
         self,
-        limit: int = 80,
         roles: Optional[list[str]] = None,
-        locations: Optional[list[str]] = None,
+        location: str = "",
         age_hours: int = 48,
         experience_codes: Optional[str] = None,
         salary_bucket: Optional[str] = None,
         work_type_codes: Optional[list[str]] = None,
         exclude_external_ids: Optional[set[str]] = None,
-    ) -> list[RawJob]:
+    ):
+        role_terms = [r for r in (roles or []) if r][: self.MAX_ROLES] or [""]
+        location_term = location.strip()
+        exclude = exclude_external_ids or set()
+        
+        def is_new(job_id: str) -> bool:
+            return f"linkedin-{job_id}" not in exclude
+
+        fetch_cap = 500  # High limit to prevent infinite loops
+        cards: dict[str, dict] = {}
+        
+        async with httpx.AsyncClient(
+            timeout=30.0, follow_redirects=True, headers={"User-Agent": _USER_AGENT}
+        ) as client:
+            for role in role_terms:
+                page = 0
+                while True:
+                    if len(cards) >= fetch_cap:
+                        break
+                    start = page * self.PAGE_SIZE
+                    found = await self._search(
+                        client,
+                        keywords=role,
+                        location=location_term,
+                        age_hours=age_hours,
+                        start=start,
+                        experience_codes=experience_codes,
+                        salary_bucket=salary_bucket,
+                        work_type_codes=work_type_codes,
+                    )
+                    if not found:
+                        break
+                        
+                    found_new_this_page = False
+                    for card in found:
+                        if len(cards) >= fetch_cap:
+                            break
+                        job_id = card.get("job_id")
+                        if job_id and job_id not in cards:
+                            card["search_location"] = location_term
+                            cards[job_id] = card
+                            
+                            if is_new(job_id):
+                                found_new_this_page = True
+                                await asyncio.sleep(0.35)
+                                card["description"] = await self._fetch_description(client, job_id)
+                                yield RawJob(
+                                    external_id=f"linkedin-{job_id}",
+                                    source=self.source_name,
+                                    title=card["title"],
+                                    company=card["company"],
+                                    url=card["url"],
+                                    location=card["location"],
+                                    posted_at=card["posted_at"],
+                                    description=card.get("description", ""),
+                                    search_location=location_term,
+                                )
+
+                    await asyncio.sleep(2.5)
+                    page += 1
+                    
+                    if not found_new_this_page and page > 3:
+                        break
+            await asyncio.sleep(1.0)
         role_terms = [r for r in (roles or []) if r][: self.MAX_ROLES] or [""]
         location_terms = [loc for loc in (locations or []) if loc][: self.MAX_LOCATIONS]
         if not location_terms:
@@ -71,13 +133,8 @@ class LinkedInScraper:
         exclude = exclude_external_ids or set()
         global_limit = compute_fetch_limit(requested=limit, locations=location_terms)
         # Paginate deeper on repeat searches when many results are already saved.
-        fetch_cap = min(
-            GLOBAL_FETCH_CAP,
-            global_limit + min(len(exclude), 250),
-        )
-        target_new = global_limit
-        per_location_target = max(JOBS_PER_LOCATION, target_new // len(location_terms))
-        pages_per_query = self.PAGES_PER_QUERY + (4 if exclude else 0)
+        fetch_cap = 500  # A high absolute limit to prevent truly infinite loops
+        target_new = fetch_cap
 
         def is_new(job_id: str) -> bool:
             return f"linkedin-{job_id}" not in exclude
@@ -86,22 +143,11 @@ class LinkedInScraper:
         async with httpx.AsyncClient(
             timeout=30.0, follow_redirects=True, headers={"User-Agent": _USER_AGENT}
         ) as client:
-            # Location-first so every country is queried before the global cap fills up.
             for location in location_terms:
-                location_new = sum(
-                    1
-                    for card in cards.values()
-                    if card.get("search_location") == location and is_new(card["job_id"])
-                )
                 for role in role_terms:
-                    if len(cards) >= fetch_cap:
-                        break
-                    if location_new >= per_location_target:
-                        break
-                    for page in range(pages_per_query):
+                    page = 0
+                    while True:
                         if len(cards) >= fetch_cap:
-                            break
-                        if location_new >= per_location_target:
                             break
                         start = page * self.PAGE_SIZE
                         found = await self._search(
@@ -122,49 +168,15 @@ class LinkedInScraper:
                             if card["job_id"] and card["job_id"] not in cards:
                                 card["search_location"] = location
                                 cards[card["job_id"]] = card
-                                if is_new(card["job_id"]):
-                                    location_new += 1
-                        await asyncio.sleep(0.5)
-                await asyncio.sleep(1.0)
+                        
+                        # "if a delay is required for accurately searching jobs so be it"
+                        await asyncio.sleep(2.5)
+                        page += 1
+                await asyncio.sleep(2.0)
 
             new_cards = [card for card in cards.values() if is_new(card["job_id"])]
             selected = new_cards[:target_new]
 
-            logger.info(
-                "LinkedIn fetched %d new cards (%d total scraped, target=%d, locations=%d)",
-                len(selected),
-                len(cards),
-                target_new,
-                len(location_terms),
-            )
-
-            semaphore = asyncio.Semaphore(4)
-
-            async def enrich(card: dict) -> None:
-                async with semaphore:
-                    await asyncio.sleep(0.35)
-                    card["description"] = await self._fetch_description(client, card["job_id"])
-
-            await asyncio.gather(*(enrich(c) for c in selected), return_exceptions=True)
-
-        jobs: list[RawJob] = []
-        for card in selected:
-            jobs.append(
-                RawJob(
-                    external_id=f"linkedin-{card['job_id']}",
-                    source=self.source_name,
-                    title=card.get("title") or "Unknown",
-                    company=card.get("company") or "Unknown",
-                    url=card.get("url") or f"https://www.linkedin.com/jobs/view/{card['job_id']}",
-                    description=card.get("description") or "",
-                    location=card.get("location") or "",
-                    company_domain="",
-                    posted_at=card.get("posted_at"),
-                    tags=[],
-                    search_location=card.get("search_location") or "",
-                )
-            )
-        return jobs
 
     async def _search(
         self,

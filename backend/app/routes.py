@@ -353,33 +353,43 @@ def update_settings(
     return _settings_response(profile)
 
 
+import json
+from fastapi.responses import StreamingResponse
+
 # --------------------------------------------------------------------------- #
 # Job search
 # --------------------------------------------------------------------------- #
-@router.post("/jobs/search", response_model=SearchStatsResponse)
+@router.post("/jobs/search")
 async def search_jobs(
     request: JobSearchRequest,
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
+    """
+    Starts a streaming search that yields jobs as they are found and stored.
+    Returns a StreamingResponse with SSE (Server-Sent Events) containing JSON lines.
+    """
     service = JobSearchService()
     filters = SearchFilters(
         seniority_levels=[lvl for lvl in request.seniority_levels if lvl in SENIORITY_LEVELS],
         posted_within_hours=request.posted_within_hours,
         min_salary=request.min_salary,
         max_salary=request.max_salary,
-        locations=request.locations,
+        location=request.location,
         roles=[r.strip() for r in request.roles if r and r.strip()],
         work_types=[wt for wt in request.work_types if wt in WORK_TYPES],
     )
-    try:
-        stats = await service.search_jobs(db, profile.id, request.max_jobs, filters)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    return SearchStatsResponse(
-        jobs_found=stats["jobs_found"],
-        jobs_stored=stats["jobs_stored"],
-    )
+    
+    # We use an async generator to stream jobs back to the client as they are processed
+    async def event_stream():
+        try:
+            async for event in service.search_jobs_stream(db, profile.id, request.max_jobs, filters):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            logger.error(f"Search stream error: {e}", exc_info=True)
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 # --------------------------------------------------------------------------- #

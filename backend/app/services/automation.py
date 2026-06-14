@@ -101,7 +101,7 @@ class AutomationService:
             try:
                 filters = SearchFilters(
                     roles=[loop.role] if loop.role else [],
-                    locations=_csv(loop.locations),
+                    location=_csv(loop.locations)[0] if _csv(loop.locations) else "",
                     seniority_levels=_csv(loop.seniority_levels),
                     posted_within_hours=loop.posted_within_hours or settings.job_age_hours,
                     min_salary=loop.min_salary,
