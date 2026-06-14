@@ -47,6 +47,7 @@ export const api = {
   me: () => request('/auth/me'),
   getGoogleAuthUrl: () => request('/auth/google/url'),
   getLinkedinAuthUrl: () => request('/auth/linkedin/url'),
+  getOAuthStatus: () => request('/auth/oauth/status'),
   deleteAccount: (password) =>
     request('/account', { method: 'DELETE', body: JSON.stringify({ password, confirm: 'DELETE' }) }),
 

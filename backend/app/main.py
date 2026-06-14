@@ -13,6 +13,7 @@ from app.routes import auth_router, router
 from app.routes_admin import admin_router
 from app.routes_billing import billing_router, webhook_router
 from app.routes_oauth import oauth_router
+from app.oauth_helpers import oauth_status
 from app.services.scheduler import shutdown_scheduler, start_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +30,12 @@ async def lifespan(app: FastAPI):
         "LLM provider=%s model=%s",
         settings.llm_provider,
         settings.ollama_model if settings.llm_provider == "ollama" else settings.gemini_model,
+    )
+    logger.info(
+        "OAuth providers: google=%s linkedin=%s callback=%s",
+        oauth_status()["google"],
+        oauth_status()["linkedin"],
+        oauth_status()["frontend_callback_url"],
     )
     start_scheduler()
     yield

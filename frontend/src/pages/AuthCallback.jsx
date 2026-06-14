@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
 
 export default function AuthCallback() {
@@ -7,20 +7,23 @@ export default function AuthCallback() {
   const navigate = useNavigate()
   const { loginWithToken } = useAuth()
   const [error, setError] = useState(null)
-  
+
   useEffect(() => {
-    const token = searchParams.get('token')
-    if (token) {
-      loginWithToken(token)
-        .then(() => {
-          navigate('/app', { replace: true })
-        })
-        .catch((err) => {
-          setError(err.message || 'Login failed')
-        })
-    } else {
-      navigate('/login', { replace: true })
+    const errorParam = searchParams.get('error')
+    if (errorParam) {
+      setError(errorParam)
+      return
     }
+
+    const token = searchParams.get('token')
+    if (!token) {
+      navigate('/login', { replace: true })
+      return
+    }
+
+    loginWithToken(token)
+      .then(() => navigate('/app', { replace: true }))
+      .catch((err) => setError(err.message || 'Login failed'))
   }, [searchParams, navigate, loginWithToken])
 
   return (
@@ -30,7 +33,10 @@ export default function AuthCallback() {
         <span className="text-main">jobapplication</span><span className="text-accent">flow</span>
       </div>
       {error ? (
-        <div className="alert alert-error">{error}</div>
+        <>
+          <div className="alert alert-error" style={{ maxWidth: '28rem', textAlign: 'center' }}>{error}</div>
+          <Link to="/login" className="btn-secondary">Back to login</Link>
+        </>
       ) : (
         <p style={{ color: 'var(--text-muted)' }}>Completing login...</p>
       )}

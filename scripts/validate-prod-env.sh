@@ -49,6 +49,11 @@ warn_if_empty STRIPE_SECRET_KEY "Stripe (Phase 3)"
 warn_if_empty STRIPE_WEBHOOK_SECRET "Stripe webhook (Phase 3, after domain live)"
 warn_if_empty CLOUDFLARE_TUNNEL_TOKEN "Cloudflare tunnel (Phase 4)"
 
+warn_if_empty GOOGLE_CLIENT_ID "Google OAuth (social login)"
+warn_if_empty GOOGLE_CLIENT_SECRET "Google OAuth secret"
+warn_if_empty LINKEDIN_CLIENT_ID "LinkedIn OAuth (social login)"
+warn_if_empty LINKEDIN_CLIENT_SECRET "LinkedIn OAuth secret"
+
 echo "=== Production env check: $ENV_FILE ==="
 echo "LLM_PROVIDER=${LLM_PROVIDER:-ollama}"
 echo "OLLAMA_MODEL=${OLLAMA_MODEL:-}"

@@ -83,8 +83,8 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     linkedin_client_id: str = ""
     linkedin_client_secret: str = ""
-    # Frontend callback URL after successful OAuth (e.g. http://localhost:5173/auth/callback)
-    oauth_frontend_callback_url: str = "http://localhost:5173/auth/callback"
+    # Frontend callback URL after OAuth (defaults to {APP_BASE_URL}/auth/callback when empty)
+    oauth_frontend_callback_url: str = ""
 
 
 settings = Settings()
