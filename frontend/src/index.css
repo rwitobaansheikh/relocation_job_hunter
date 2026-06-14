@@ -551,7 +551,7 @@ label {
   inset: 0;
   background: rgba(30, 41, 59, 0.4);
   backdrop-filter: blur(4px);
-  z-index: 90;
+  z-index: 115;
 }
 
 .sidebar-header {
@@ -576,7 +576,6 @@ label {
   font-size: 1.25rem;
   line-height: 1;
   cursor: pointer;
-  display: flex;
   align-items: center;
   justify-content: center;
 }
@@ -591,7 +590,7 @@ label {
     top: 0;
     left: 0;
     bottom: 0;
-    z-index: 100;
+    z-index: 120;
     width: min(300px, 85vw);
     transform: translateX(-105%);
     transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
