@@ -98,54 +98,6 @@ class JobSearchService:
                     break
         return final_stats
 
-    async def search_jobs(
-        self,
-        db: Session,
-        user_profile_id: int,
-        max_jobs: int = 100,
-        filters: Optional[SearchFilters] = None,
-    ) -> dict:
-        """Original synchronous-like search (used by automation loops).
-        Iterates the stream and accumulates stats."""
-        final_stats = {
-            "jobs_found": 0,
-            "jobs_stored": 0,
-            "jobs_filtered": 0,
-        }
-        async for event in self.search_jobs_stream(db, user_profile_id, max_jobs, filters):
-            if event["type"] == "done":
-                final_stats = event["stats"]
-                break
-            elif event["type"] == "job":
-                final_stats = event["stats"]
-                if final_stats["jobs_stored"] >= max_jobs:
-                    break
-        return final_stats
-
-    async def search_jobs(
-        self,
-        db: Session,
-        user_profile_id: int,
-        max_jobs: int = 100,
-        filters: Optional[SearchFilters] = None,
-    ) -> dict:
-        """Original synchronous-like search (used by automation loops).
-        Iterates the stream and accumulates stats."""
-        final_stats = {
-            "jobs_found": 0,
-            "jobs_stored": 0,
-            "jobs_filtered": 0,
-        }
-        async for event in self.search_jobs_stream(db, user_profile_id, max_jobs, filters):
-            if event["type"] == "done":
-                final_stats = event["stats"]
-                break
-            elif event["type"] == "job":
-                final_stats = event["stats"]
-                if final_stats["jobs_stored"] >= max_jobs:
-                    break
-        return final_stats
-
     async def search_jobs_stream(
         self,
         db: Session,
@@ -210,6 +162,10 @@ class JobSearchService:
                 continue
 
             if job.posted_at and job.posted_at < cutoff:
+                stats["jobs_filtered"] += 1
+                continue
+
+            if not self.matcher.matches_locations(job, [filters.location] if filters.location else locations):
                 stats["jobs_filtered"] += 1
                 continue
 

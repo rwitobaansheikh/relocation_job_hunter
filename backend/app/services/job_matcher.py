@@ -241,18 +241,9 @@ class JobMatcher:
         if not countries:
             return True
 
-        # Jobs returned from a LinkedIn query for a specific place count as a
-        # match for that target (e.g. Germany search even if JD omits "Germany").
-        search_loc = (getattr(job, "search_location", None) or "").strip().lower()
-        if search_loc:
-            for country in countries:
-                if country == search_loc or country in search_loc or search_loc in country:
-                    return True
-                for alias in COUNTRY_ALIASES.get(country, []):
-                    if alias == search_loc or alias in search_loc or search_loc in alias:
-                        return True
-
         text = " ".join([job.location, job.description, " ".join(job.tags)]).lower()
+        
+        # Exact/Alias match in text
         for country in countries:
             if country in text:
                 return True
@@ -260,7 +251,17 @@ class JobMatcher:
                 if alias in text:
                     return True
 
-        return any(signal in text for signal in GLOBAL_LOCATION_SIGNALS)
+        # Check worldwide remote signals ONLY if the user didn't explicitly restrict to a non-remote physical country,
+        # OR if the job explicitly says "anywhere" / "worldwide"
+        worldwide_signals = ["worldwide", "anywhere", "global", "no location restriction", "remote (global)"]
+        if any(signal in text for signal in worldwide_signals):
+            return True
+            
+        # If they explicitly search for "remote", allow jobs with "remote" in them
+        if "remote" in countries and "remote" in text:
+            return True
+
+        return False
 
     @staticmethod
     def _cv_tokens(cv_text: str) -> set[str]:

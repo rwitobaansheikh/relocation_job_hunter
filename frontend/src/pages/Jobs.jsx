@@ -193,7 +193,7 @@ export default function Jobs() {
     const locs = criteria.locations.filter((l) => selectedLocations.has(l))
     const levels = criteria.seniority_levels.filter((s) => selectedSeniority.has(s))
     setSearchRoles(roles)
-    setLocations(locs.join(', '))
+    setLocations(locs.length > 0 ? locs[0] : '')
     if (levels.length) setSeniority(levels)
     if (criteria.posted_within_hours) setPostedWithin(String(criteria.posted_within_hours))
     setMinSalary(criteria.min_salary != null ? String(criteria.min_salary) : '')
@@ -509,12 +509,12 @@ export default function Jobs() {
         </div>
 
         <div className="form-group">
-          <label>Locations (comma-separated)</label>
+          <label>Location (single country/city)</label>
           <input
             type="text"
-            placeholder="e.g. United Kingdom, Germany, Remote — blank uses your profile countries"
+            placeholder="e.g. Netherlands — blank uses your profile countries"
             value={locations}
-            onChange={(e) => setLocations(e.target.value)}
+            onChange={(e) => setLocations(e.target.value.replace(/,/g, ''))}
           />
         </div>
 
@@ -523,7 +523,7 @@ export default function Jobs() {
           onClick={handleSearch}
           disabled={searching}
           title="Start Job Search"
-          help="Runs a search across LinkedIn, RemoteOK, Remotive, and more. With 5+ countries selected, fetches at least 100 jobs ranked against your CV and saved to Applications."
+          help="Runs a search across LinkedIn and other boards. The search processes strictly one location per request."
         >
           {searching ? 'Searching... (this may take a minute)' : 'Start Job Search'}
         </HelpButton>

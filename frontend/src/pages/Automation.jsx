@@ -52,8 +52,12 @@ function LoopForm({ initial, onCancel, onSave, saving, autoCap }) {
           <input value={form.role} onChange={(e) => set('role', e.target.value)} placeholder="e.g. Frontend Engineer" />
         </div>
         <div className="form-group">
-          <label>Locations (comma-separated)</label>
-          <input value={form.locations} onChange={(e) => set('locations', e.target.value)} placeholder="blank = your profile countries" />
+          <label>Location (single country/city)</label>
+          <input 
+            value={form.locations} 
+            onChange={(e) => set('locations', e.target.value.replace(/,/g, ''))} 
+            placeholder="e.g. Netherlands — blank uses your profile countries" 
+          />
         </div>
         <div className="form-group">
           <label>Posted within</label>
