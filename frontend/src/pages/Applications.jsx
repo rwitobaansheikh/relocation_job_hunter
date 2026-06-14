@@ -2,9 +2,43 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import JobDescription from '../components/JobDescription'
 import HelpButton from '../components/HelpButton'
+import OnboardingGuide from '../components/OnboardingGuide'
+import TailoredDocuments from '../components/TailoredDocuments'
 import { useProfile } from '../ProfileContext'
 
 const STATUS_OPTIONS = ['', 'discovered', 'tailored', 'applied', 'follow_up_sent', 'interview', 'rejected', 'replied']
+
+const FIRST_APP_STEPS = [
+  {
+    step: 1,
+    title: 'Upload your CV',
+    body: 'Add your CV and cover letter in Profile so the AI can tailor documents for each role.',
+    to: '/app/profile',
+    linkLabel: 'Go to Profile →',
+  },
+  {
+    step: 2,
+    title: 'Search for jobs',
+    body: 'Pick one location and run a search. New matches are saved here automatically.',
+    to: '/app/jobs',
+    linkLabel: 'Search jobs →',
+  },
+  {
+    step: 3,
+    title: 'Tailor your documents',
+    body: 'Click Tailor on a job card. The AI rewrites your CV and cover letter for that role.',
+  },
+  {
+    step: 4,
+    title: 'Review & send',
+    body: 'Open your tailored CV and cover letter, preview the email, then send outreach.',
+  },
+]
+
+function hasTailoredDocs(app) {
+  return Boolean(app.tailored_cv_path || app.tailored_cover_letter_path)
+    || ['tailored', 'applied', 'follow_up_sent', 'interview', 'replied'].includes(app.status)
+}
 
 export default function Applications() {
   const { profile } = useProfile()
@@ -20,6 +54,7 @@ export default function Applications() {
   const [loadingContacts, setLoadingContacts] = useState(null)
   const [expandedAnalysis, setExpandedAnalysis] = useState(null)
   const [expandedDesc, setExpandedDesc] = useState(null)
+  const [expandedDocs, setExpandedDocs] = useState(null)
 
   const parseAnalysis = (app) => {
     try {
@@ -49,25 +84,20 @@ export default function Applications() {
     try {
       if (action === 'tailor') {
         const app = await api.tailorSingle(appId)
-        const usedAi = app.tailored_cv_path?.includes('/app_') || app.tailored_cv_path?.includes('generated/app_')
-        setActionMsg({
-          type: 'success',
-          text: usedAi
-            ? 'AI-tailored CV and cover letter generated for this role.'
-            : 'Documents updated.',
-        })
+        setActionMsg({ type: 'success', text: 'Documents tailored. Open them below to review before sending.' })
+        setExpandedDocs(appId)
       } else if (action === 'send') {
         await api.sendOutreach(appId, false)
         setActionMsg({ type: 'success', text: 'Outreach emails sent' })
       } else if (action === 'dry-run') {
         const emails = await api.sendOutreach(appId, true)
-        setActionMsg({ type: 'info', text: `Dry run: previewed ${emails.length} email(s). Click "View Emails" to read them.` })
+        setActionMsg({ type: 'info', text: `Preview ready for ${emails.length} email(s).` })
         await refreshEmails(appId, true)
       } else if (action === 'test') {
         const emails = await api.sendOutreach(appId, false, true)
         const result = emails[0]
         if (result?.status === 'test_sent') {
-          setActionMsg({ type: 'success', text: `Test email sent to your registered address (${result.recipient_email}). Check your inbox.` })
+          setActionMsg({ type: 'success', text: `Test email sent to ${result.recipient_email}` })
         } else {
           setActionMsg({ type: 'error', text: `Test send failed: ${result?.error_message || 'unknown error'}` })
         }
@@ -91,16 +121,10 @@ export default function Applications() {
         setActionMsg({ type: 'info', text: 'No discovered applications to tailor' })
       } else {
         const tailored = await api.tailorDocuments(discovered)
-        if (tailored.length === 0) {
-          setActionMsg({ type: 'info', text: 'No applications were tailored.' })
-        } else if (tailored.length < discovered.length) {
-          setActionMsg({
-            type: 'success',
-            text: `AI-tailored ${tailored.length} of ${discovered.length} applications. Retry the rest if the LLM was busy.`,
-          })
-        } else {
-          setActionMsg({ type: 'success', text: `AI-tailored ${tailored.length} application(s).` })
-        }
+        setActionMsg({
+          type: 'success',
+          text: `Tailored ${tailored.length} application(s). Open each card to review CV and cover letter.`,
+        })
         await loadApps()
       }
     } catch (err) {
@@ -119,9 +143,7 @@ export default function Applications() {
       setActionMsg({ type: 'info', text: 'No jobs to clear' })
       return
     }
-    if (!window.confirm('Remove ALL jobs/applications for this profile? This cannot be undone.')) {
-      return
-    }
+    if (!window.confirm('Remove ALL jobs/applications for this profile? This cannot be undone.')) return
     setBusy('clear')
     setActionMsg(null)
     try {
@@ -149,6 +171,10 @@ export default function Applications() {
       setExpandedEmails(null)
       return
     }
+    setExpandedDesc(null)
+    setExpandedContacts(null)
+    setExpandedAnalysis(null)
+    setExpandedDocs(null)
     await refreshEmails(appId, true)
   }
 
@@ -158,7 +184,10 @@ export default function Applications() {
       return
     }
     setExpandedContacts(appId)
-    // Fetch (or re-fetch) the contacts for this job from RocketReach.
+    setExpandedDesc(null)
+    setExpandedEmails(null)
+    setExpandedAnalysis(null)
+    setExpandedDocs(null)
     setLoadingContacts(appId)
     try {
       const contacts = await api.getContacts(appId)
@@ -169,9 +198,36 @@ export default function Applications() {
     setLoadingContacts(null)
   }
 
+
+  const toggleDocs = (appId) => {
+    setExpandedDocs((prev) => (prev === appId ? null : appId))
+    setExpandedDesc(null)
+    setExpandedEmails(null)
+    setExpandedContacts(null)
+    setExpandedAnalysis(null)
+  }
+
+  const toggleDesc = (appId) => {
+    setExpandedDesc((prev) => (prev === appId ? null : appId))
+    setExpandedDocs(null)
+    setExpandedEmails(null)
+    setExpandedContacts(null)
+    setExpandedAnalysis(null)
+  }
+
+  const toggleAnalysis = (appId) => {
+    setExpandedAnalysis((prev) => (prev === appId ? null : appId))
+    setExpandedDocs(null)
+    setExpandedDesc(null)
+    setExpandedEmails(null)
+    setExpandedContacts(null)
+  }
+
   if (!profile) {
     return <div className="empty-state"><p>Create your profile first.</p></div>
   }
+
+  const showOnboarding = applications.length === 0 || applications.every((a) => a.status === 'discovered')
 
   return (
     <div>
@@ -183,7 +239,7 @@ export default function Applications() {
             onClick={handleBulkTailor}
             disabled={busy === 'bulk'}
             title="Tailor All Discovered"
-            help="Generates tailored CV and cover letter for every job still in “discovered” status — run this before sending outreach in bulk."
+            help="Generates tailored CV and cover letter for every job still in discovered status."
           >
             Tailor All Discovered
           </HelpButton>
@@ -192,20 +248,28 @@ export default function Applications() {
             onClick={handleClearAll}
             disabled={busy === 'clear' || applications.length === 0}
             title="Remove All Jobs"
-            help="Permanently deletes every saved application from your list. This cannot be undone."
+            help="Permanently deletes every saved application."
           >
-            {busy === 'clear' ? 'Clearing…' : 'Remove All Jobs'}
+            {busy === 'clear' ? 'Clearing…' : 'Remove All'}
           </HelpButton>
         </div>
       </div>
-      <p className="page-subtitle">Manage job applications, send outreach, and track follow-ups</p>
+      <p className="page-subtitle">Tailor documents, review them, then send outreach — one job at a time.</p>
+
+      {showOnboarding && (
+        <OnboardingGuide
+          storageKey="jh_onboarding_first_app"
+          title="Your first application in 4 steps"
+          steps={FIRST_APP_STEPS}
+        />
+      )}
 
       {actionMsg && <div className={`alert alert-${actionMsg.type}`}>{actionMsg.text}</div>}
 
-      <div style={{ marginBottom: '1.5rem' }}>
-        <select value={filter} onChange={(e) => setFilter(e.target.value)} style={{ width: '200px' }}>
+      <div className="applications-toolbar">
+        <select value={filter} onChange={(e) => setFilter(e.target.value)} className="status-filter">
           {STATUS_OPTIONS.map((s) => (
-            <option key={s} value={s}>{s || 'All statuses'}</option>
+            <option key={s} value={s}>{s ? s.replace('_', ' ') : 'All statuses'}</option>
           ))}
         </select>
       </div>
@@ -214,229 +278,204 @@ export default function Applications() {
         <p>Loading...</p>
       ) : applications.length === 0 ? (
         <div className="empty-state">
-          <p>No applications yet. Search for jobs to get started.</p>
+          <p>No applications yet.</p>
+          <p className="muted">Search for jobs and they will appear here automatically.</p>
         </div>
       ) : (
-        <div className="job-list">
+        <div className="application-list">
           {applications.map((app) => (
-            <div key={app.id} className="job-item">
-              <div className="job-info">
-                <h3>{app.job?.title || 'Unknown Role'}</h3>
-                <div className="meta">
-                  {app.job?.company} · {app.job?.location} · Score: {app.job?.relevance_score}
-                  {app.job?.seniority_level && app.job.seniority_level !== 'unspecified' && (
-                    ` · ${app.job.seniority_level}`
-                  )}
-                  {app.job?.salary_text && ` · ${app.job.salary_text}`}
-                  {app.ai_match_score > 0 && (
-                    <strong style={{ color: 'var(--accent)' }}> · AI Match: {app.ai_match_score}/100</strong>
-                  )}
-                  {app.job?.relocation_keywords && ` · Relocation: ${app.job.relocation_keywords}`}
+            <article key={app.id} className="application-card">
+              <header className="application-card__header">
+                <div className="application-card__info">
+                  <h3>{app.job?.title || 'Unknown Role'}</h3>
+                  <p className="application-card__meta">
+                    {app.job?.company}
+                    {app.job?.location && ` · ${app.job.location}`}
+                    {app.ai_match_score > 0 && (
+                      <span className="application-card__match"> · Match {app.ai_match_score}/100</span>
+                    )}
+                  </p>
+                  <div className="application-card__tags">
+                    <span className={`badge badge-${app.status}`}>{app.status.replace('_', ' ')}</span>
+                    {app.job?.url && (
+                      <a href={app.job.url} target="_blank" rel="noreferrer" className="application-card__link">
+                        View listing →
+                      </a>
+                    )}
+                  </div>
                 </div>
-                <div style={{ marginTop: '0.4rem' }}>
-                  <span className={`badge badge-${app.status}`}>{app.status.replace('_', ' ')}</span>
-                  {app.next_follow_up_at && (
-                    <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem', color: 'var(--warning)' }}>
-                      Follow-up: {new Date(app.next_follow_up_at).toLocaleDateString()}
-                    </span>
-                  )}
+                <select
+                  className="status-select"
+                  value={app.status}
+                  onChange={(e) => handleStatusChange(app.id, e.target.value)}
+                  aria-label="Application status"
+                >
+                  {STATUS_OPTIONS.filter(Boolean).map((s) => (
+                    <option key={s} value={s}>{s.replace('_', ' ')}</option>
+                  ))}
+                </select>
+              </header>
+
+              {hasTailoredDocs(app) && (
+                <div className="application-card__ready">
+                  <span>Tailored documents ready</span>
+                  <button
+                    type="button"
+                    className="btn-primary btn-sm"
+                    onClick={() => toggleDocs(app.id)}
+                  >
+                    {expandedDocs === app.id ? 'Hide documents' : 'View CV & Cover Letter'}
+                  </button>
                 </div>
-                {app.job?.url && (
-                  <a href={app.job.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.85rem' }}>
-                    View listing →
-                  </a>
-                )}
-              </div>
-              <div className="job-actions">
+              )}
+
+              <div className="application-card__primary">
                 {app.status === 'discovered' && (
                   <HelpButton
-                    className="btn-secondary"
+                    className="btn-primary"
                     disabled={busy === app.id}
                     onClick={() => handleAction('tailor', app.id)}
-                    title="Tailor Docs"
-                    help="AI rewrites your CV bullets and cover letter to match this specific job before you reach out."
+                    title="Tailor documents"
+                    help="AI rewrites your CV and cover letter for this specific job."
                   >
-                    Tailor Docs
+                    {busy === app.id ? 'Tailoring…' : '1. Tailor documents'}
                   </HelpButton>
                 )}
                 {app.status === 'tailored' && (
                   <>
                     <HelpButton
-                      className="btn-secondary"
+                      className="btn-primary"
                       disabled={busy === app.id}
-                      onClick={() => handleAction('dry-run', app.id)}
-                      title="Preview Email"
-                      help="Shows the outreach email that would be sent — nothing is delivered until you confirm."
+                      onClick={() => handleAction('send', app.id)}
+                      title="Send outreach"
+                      help="Finds recruiter contacts and sends your tailored application."
                     >
-                      Preview Email
+                      {busy === app.id ? 'Sending…' : '3. Send outreach'}
                     </HelpButton>
                     <HelpButton
                       className="btn-secondary"
                       disabled={busy === app.id}
                       onClick={() => handleAction('test', app.id)}
-                      title="Send Test to Me"
-                      help="Sends a copy of the outreach email to your own inbox so you can review formatting and tone."
+                      title="Send test to me"
+                      help="Sends a copy to your own inbox so you can review formatting."
                     >
-                      Send Test to Me
-                    </HelpButton>
-                    <HelpButton
-                      className="btn-primary"
-                      disabled={busy === app.id}
-                      onClick={() => handleAction('send', app.id)}
-                      title="Send Outreach"
-                      help="Finds recruiter contacts and sends your tailored application email to the company."
-                    >
-                      Send Outreach
+                      Send test to me
                     </HelpButton>
                   </>
                 )}
-                {app.job?.description && (
-                  <HelpButton
-                    className="btn-secondary"
-                    onClick={() => setExpandedDesc(expandedDesc === app.id ? null : app.id)}
-                    title="View Description"
-                    help="Expand the full job posting text here without leaving the app."
-                  >
-                    {expandedDesc === app.id ? 'Hide Description' : 'View Description'}
-                  </HelpButton>
-                )}
-                {app.analysis_json && (
-                  <HelpButton
-                    className="btn-secondary"
-                    onClick={() => setExpandedAnalysis(expandedAnalysis === app.id ? null : app.id)}
-                    title="View Analysis"
-                    help="See how well your CV matches this role — score breakdown, gaps, and red flags from AI."
-                  >
-                    {expandedAnalysis === app.id ? 'Hide Analysis' : 'View Analysis'}
-                  </HelpButton>
-                )}
-                <HelpButton
-                  className="btn-secondary"
-                  disabled={loadingContacts === app.id}
-                  onClick={() => toggleContacts(app.id)}
-                  title="Find Contacts"
-                  help="Looks up hiring managers and recruiters at this company so you know who receives outreach."
-                >
-                  {expandedContacts === app.id ? 'Hide Contacts' : 'Find Contacts'}
-                </HelpButton>
-                <HelpButton
-                  className="btn-secondary"
-                  disabled={busy === app.id}
-                  onClick={() => toggleEmails(app.id)}
-                  title="View Emails"
-                  help="Shows every email sent or drafted for this application, including subjects and full bodies."
-                >
-                  {expandedEmails === app.id ? 'Hide Emails' : 'View Emails'}
-                </HelpButton>
                 {(app.status === 'applied' || app.status === 'follow_up_sent') && (
                   <HelpButton
                     className="btn-secondary"
                     disabled={busy === app.id}
                     onClick={() => handleAction('follow-up', app.id)}
-                    title="Log Follow-up"
-                    help="Records that you sent a follow-up and schedules the next reminder if needed."
+                    title="Log follow-up"
+                    help="Records a follow-up and schedules the next reminder."
                   >
-                    Log Follow-up
+                    Log follow-up
                   </HelpButton>
                 )}
-                <select
-                  value={app.status}
-                  onChange={(e) => handleStatusChange(app.id, e.target.value)}
-                  style={{ width: 'auto', fontSize: '0.8rem' }}
-                >
-                  {STATUS_OPTIONS.filter(Boolean).map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
               </div>
 
-              {expandedDesc === app.id && (
-                <div className="email-records">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                    <div style={{ fontSize: '0.95rem', fontWeight: 600 }}>Job Description</div>
-                    {app.job?.url && (
-                      <a href={app.job.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.85rem' }}>
-                        Open original post →
-                      </a>
-                    )}
-                  </div>
-                  {app.job?.salary_text && (
-                    <div style={{ fontSize: '0.85rem', marginBottom: '0.5rem', color: 'var(--text-muted)' }}>
-                      <strong>Salary:</strong> {app.job.salary_text}
-                    </div>
+              <details className="application-card__more">
+                <summary>More options</summary>
+                <div className="application-card__more-actions">
+                  {app.status === 'tailored' && (
+                    <HelpButton
+                      className="btn-secondary btn-sm"
+                      disabled={busy === app.id}
+                      onClick={() => handleAction('dry-run', app.id)}
+                      title="Preview email"
+                      help="Shows the outreach email without sending it."
+                    >
+                      Preview email
+                    </HelpButton>
                   )}
+                  {hasTailoredDocs(app) && (
+                    <button
+                      type="button"
+                      className="btn-secondary btn-sm"
+                      onClick={() => toggleDocs(app.id)}
+                    >
+                      View tailored docs
+                    </button>
+                  )}
+                  {app.job?.description && (
+                    <button
+                      type="button"
+                      className="btn-secondary btn-sm"
+                      onClick={() => toggleDesc(app.id)}
+                    >
+                      {expandedDesc === app.id ? 'Hide description' : 'Job description'}
+                    </button>
+                  )}
+                  {app.analysis_json && (
+                    <button
+                      type="button"
+                      className="btn-secondary btn-sm"
+                      onClick={() => toggleAnalysis(app.id)}
+                    >
+                      {expandedAnalysis === app.id ? 'Hide analysis' : 'AI match analysis'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm"
+                    disabled={loadingContacts === app.id}
+                    onClick={() => toggleContacts(app.id)}
+                  >
+                    {expandedContacts === app.id ? 'Hide contacts' : 'Find contacts'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm"
+                    onClick={() => toggleEmails(app.id)}
+                  >
+                    {expandedEmails === app.id ? 'Hide emails' : 'View emails'}
+                  </button>
+                </div>
+              </details>
+
+              <TailoredDocuments
+                applicationId={app.id}
+                open={expandedDocs === app.id}
+                onClose={() => setExpandedDocs(null)}
+              />
+
+              {expandedDesc === app.id && (
+                <div className="application-card__panel">
+                  <div className="application-card__panel-title">Job description</div>
                   <JobDescription html={app.job?.description} />
                 </div>
               )}
 
               {expandedAnalysis === app.id && (() => {
                 const a = parseAnalysis(app)
-                if (!a) return <div className="email-records"><p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No analysis available.</p></div>
+                if (!a) return <div className="application-card__panel"><p className="muted">No analysis available.</p></div>
                 return (
-                  <div className="email-records">
-                    <div style={{ fontSize: '0.95rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                      AI Match Analysis — {a.match_score ?? app.ai_match_score}/100
-                    </div>
-                    {Array.isArray(a.score_explanation) && a.score_explanation.length > 0 && (
-                      <div style={{ marginBottom: '0.8rem' }}>
-                        {a.score_explanation.map((b, i) => (
-                          <div key={i} style={{ fontSize: '0.82rem', marginBottom: '0.3rem' }}>
-                            <strong>{b.category}:</strong> {b.score}
-                            {Array.isArray(b.evidence) && b.evidence.length > 0 && (
-                              <ul style={{ margin: '0.2rem 0 0 1.1rem', color: 'var(--text-muted)' }}>
-                                {b.evidence.map((ev, j) => <li key={j}>{ev}</li>)}
-                              </ul>
-                            )}
-                          </div>
-                        ))}
+                  <div className="application-card__panel">
+                    <div className="application-card__panel-title">AI match — {a.match_score ?? app.ai_match_score}/100</div>
+                    {Array.isArray(a.score_explanation) && a.score_explanation.map((b, i) => (
+                      <div key={i} style={{ fontSize: '0.85rem', marginBottom: '0.4rem' }}>
+                        <strong>{b.category}:</strong> {b.score}
                       </div>
-                    )}
-                    {Array.isArray(a.gaps_and_suggestions) && a.gaps_and_suggestions.length > 0 && (
-                      <div style={{ marginBottom: '0.8rem' }}>
-                        <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>Gaps & Suggestions</div>
-                        <ul style={{ margin: '0.2rem 0 0 1.1rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                          {a.gaps_and_suggestions.map((g, i) => (
-                            <li key={i}><strong>{g.gap}</strong>{g.suggestion ? ` — ${g.suggestion}` : ''}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    {Array.isArray(a.red_flags) && a.red_flags.length > 0 && (
-                      <div>
-                        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--danger, #f87171)' }}>Red Flags</div>
-                        <ul style={{ margin: '0.2rem 0 0 1.1rem', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                          {a.red_flags.map((r, i) => <li key={i}>{r}</li>)}
-                        </ul>
-                      </div>
-                    )}
+                    ))}
                   </div>
                 )
               })()}
 
               {expandedContacts === app.id && (
-                <div className="email-records">
-                  <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                    Outreach contacts for {app.job?.company} (via RocketReach)
-                  </div>
+                <div className="application-card__panel">
+                  <div className="application-card__panel-title">Contacts for {app.job?.company}</div>
                   {loadingContacts === app.id ? (
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Searching for contacts…</p>
+                    <p className="muted">Searching…</p>
                   ) : (contactsByApp[app.id] || []).length === 0 ? (
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                      No contacts found for this company.
-                    </p>
+                    <p className="muted">No contacts found.</p>
                   ) : (
                     (contactsByApp[app.id] || []).map((c, i) => (
-                      <div key={`${c.email}-${i}`} className="email-record" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
-                        <div style={{ fontSize: '0.85rem' }}>
-                          <strong>{c.name || '(no name)'}</strong>
-                          {c.title && <span style={{ color: 'var(--text-muted)' }}> · {c.title}</span>}
-                          <div>
-                            <a href={`mailto:${c.email}`}>{c.email}</a>
-                          </div>
-                        </div>
-                        {c.confidence > 0 && (
-                          <span className="badge" style={{ flexShrink: 0 }}>{c.confidence}% confidence</span>
-                        )}
+                      <div key={`${c.email}-${i}`} className="email-record">
+                        <strong>{c.name || c.email}</strong>
+                        {c.title && <span className="muted"> · {c.title}</span>}
+                        <div><a href={`mailto:${c.email}`}>{c.email}</a></div>
                       </div>
                     ))
                   )}
@@ -444,39 +483,23 @@ export default function Applications() {
               )}
 
               {expandedEmails === app.id && (
-                <div className="email-records">
+                <div className="application-card__panel">
+                  <div className="application-card__panel-title">Outreach emails</div>
                   {(emailsByApp[app.id] || []).length === 0 ? (
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                      No emails recorded yet. Use “Preview Email”, “Send Test to Me”, or “Send Outreach”.
-                    </p>
+                    <p className="muted">No emails yet. Preview or send outreach to create one.</p>
                   ) : (
                     (emailsByApp[app.id] || []).map((em) => (
                       <div key={em.id} className="email-record">
-                        <div style={{ fontSize: '0.85rem' }}>
-                          <span className={`badge badge-${em.status}`}>{em.status.replace('_', ' ')}</span>
-                          <strong style={{ marginLeft: '0.5rem' }}>{em.recipient_name || em.recipient_email}</strong>
-                          {' '}&lt;{em.recipient_email}&gt;
-                          {em.sent_at && (
-                            <span style={{ marginLeft: '0.5rem', color: 'var(--text-muted)' }}>
-                              · {new Date(em.sent_at).toLocaleString()}
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: '0.85rem', marginTop: '0.3rem' }}>
-                          <strong>Subject:</strong> {em.subject}
-                        </div>
-                        {em.error_message && (
-                          <div style={{ fontSize: '0.8rem', color: 'var(--danger, #f87171)', marginTop: '0.3rem' }}>
-                            Error: {em.error_message}
-                          </div>
-                        )}
+                        <span className={`badge badge-${em.status}`}>{em.status}</span>
+                        <strong> {em.recipient_name || em.recipient_email}</strong>
+                        <div className="muted" style={{ marginTop: '0.3rem' }}>{em.subject}</div>
                         <div className="email-body">{em.body}</div>
                       </div>
                     ))
                   )}
                 </div>
               )}
-            </div>
+            </article>
           ))}
         </div>
       )}

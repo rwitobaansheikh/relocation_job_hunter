@@ -1,6 +1,25 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import HelpButton from '../components/HelpButton'
+import OnboardingGuide from '../components/OnboardingGuide'
+
+const AUTOMATION_STEPS = [
+  {
+    step: 1,
+    title: 'Pick one role & location',
+    body: 'Each loop targets a single job title and one country or city — e.g. "Machine Learning Engineer" in Netherlands.',
+  },
+  {
+    step: 2,
+    title: 'Set your schedule',
+    body: 'Choose how often the loop runs and how many applications it sends per day (within your plan limits).',
+  },
+  {
+    step: 3,
+    title: 'Enable the loop',
+    body: 'Turn it on and the app will search, tailor documents, and send outreach automatically.',
+  },
+]
 
 const SENIORITY_OPTIONS = [
   { value: 'intern', label: 'Internship' },
@@ -221,8 +240,16 @@ export default function Automation() {
     <div>
       <h2 className="page-title">Automation</h2>
       <p className="page-subtitle">
-        Each loop searches one role, tailors documents, and sends applications automatically on a schedule.
+        Each loop searches one role in one location, tailors documents, and sends applications on a schedule.
       </p>
+
+      {loops.length === 0 && editing !== 'new' && (
+        <OnboardingGuide
+          storageKey="jh_onboarding_automation"
+          title="Setting up your first automation loop"
+          steps={AUTOMATION_STEPS}
+        />
+      )}
 
       {message && <div className={`alert alert-${message.type}`}>{message.text}</div>}
 
@@ -260,7 +287,7 @@ export default function Automation() {
       {loops.length === 0 && editing !== 'new' ? (
         <div className="empty-state"><p>No automation loops yet.</p></div>
       ) : (
-        <div className="job-list">
+        <div className="application-list">
           {loops.map((loop) => (
             editing === loop.id ? (
               <LoopForm
@@ -276,28 +303,30 @@ export default function Automation() {
                 onSave={(form) => saveEdit(loop.id, form)}
               />
             ) : (
-              <div key={loop.id} className="job-item">
-                <div className="job-info">
-                  <h3>{loop.name || loop.role || 'Untitled loop'}</h3>
-                  <div className="meta">
-                    Role: {loop.role || '(any)'} · {loop.locations || 'profile countries'} ·
-                    every {loop.interval_hours}h · up to {loop.daily_send_cap}/day
-                    {loop.last_run_at && ` · last run ${new Date(loop.last_run_at).toLocaleString()}`}
+              <article key={loop.id} className="application-card">
+                <header className="application-card__header">
+                  <div className="application-card__info">
+                    <h3>{loop.name || loop.role || 'Untitled loop'}</h3>
+                    <p className="application-card__meta">
+                      {loop.role || 'Any role'} · {loop.locations || 'profile countries'} · every {loop.interval_hours}h
+                    </p>
+                    <div className="application-card__tags">
+                      <span className={`badge badge-${loop.enabled ? 'applied' : 'rejected'}`}>
+                        {loop.enabled ? 'enabled' : 'disabled'}
+                      </span>
+                      <span className="muted" style={{ fontSize: '0.85rem' }}>
+                        up to {loop.daily_send_cap}/day
+                        {loop.last_run_at && ` · last run ${new Date(loop.last_run_at).toLocaleString()}`}
+                      </span>
+                    </div>
                   </div>
-                  <div style={{ marginTop: '0.4rem' }}>
-                    <span className={`badge badge-${loop.enabled ? 'applied' : 'rejected'}`}>
-                      {loop.enabled ? 'enabled' : 'disabled'}
-                    </span>
-                  </div>
-                </div>
-                <div className="job-actions">
+                </header>
+                <div className="application-card__primary">
                   <HelpButton
                     className="btn-secondary"
                     onClick={() => toggle(loop)}
                     title={loop.enabled ? 'Disable' : 'Enable'}
-                    help={loop.enabled
-                      ? 'Pause this loop — it will stop searching and sending until you turn it back on.'
-                      : 'Resume this loop so it runs again on its schedule.'}
+                    help={loop.enabled ? 'Pause this loop.' : 'Resume this loop.'}
                   >
                     {loop.enabled ? 'Disable' : 'Enable'}
                   </HelpButton>
@@ -305,7 +334,7 @@ export default function Automation() {
                     className="btn-secondary"
                     onClick={() => setEditing(loop.id)}
                     title="Edit"
-                    help="Change the role, locations, schedule, or daily send limits for this automation loop."
+                    help="Change role, location, schedule, or daily limits."
                   >
                     Edit
                   </HelpButton>
@@ -313,12 +342,12 @@ export default function Automation() {
                     className="btn-danger"
                     onClick={() => remove(loop)}
                     title="Delete"
-                    help="Remove this loop permanently. Running automations for this role will stop."
+                    help="Remove this loop permanently."
                   >
                     Delete
                   </HelpButton>
                 </div>
-              </div>
+              </article>
             )
           ))}
         </div>

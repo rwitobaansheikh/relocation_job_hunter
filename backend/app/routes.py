@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -5,6 +6,7 @@ from typing import Optional
 
 import aiofiles
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth import (
@@ -53,6 +55,7 @@ from app.schemas import (
     SettingsResponse,
     SettingsUpdate,
     TailorDocumentsRequest,
+    TailoredDocumentsResponse,
     TokenResponse,
     UserProfileResponse,
     UserProfileUpdate,
@@ -72,7 +75,6 @@ from app.services.role_suggester import suggest_roles
 from app.services.search_criteria_suggester import suggest_search_criteria
 from app.services.scraper.base import RawJob
 from app.services.url_importer import import_job_from_url
-from app.services.plans import effective_limits
 from app.services.usage import get_usage, incr_usage
 
 logger = logging.getLogger(__name__)
@@ -368,9 +370,6 @@ def update_settings(
     return _settings_response(profile)
 
 
-import json
-from fastapi.responses import StreamingResponse
-
 # --------------------------------------------------------------------------- #
 # Job search
 # --------------------------------------------------------------------------- #
@@ -574,6 +573,75 @@ def get_application(
     db: Session = Depends(get_db),
 ):
     return _owned_application(db, application_id, profile, with_job=True)
+
+
+@router.get("/applications/{application_id}/documents", response_model=TailoredDocumentsResponse)
+def get_tailored_documents(
+    application_id: int,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    """Return metadata and cover letter text for tailored documents."""
+    app = _owned_application(db, application_id, profile)
+    cv_path = (app.tailored_cv_path or "").strip()
+    cl_path = (app.tailored_cover_letter_path or "").strip()
+
+    cover_text = ""
+    if app.analysis_json:
+        try:
+            parsed = json.loads(app.analysis_json)
+            cover_text = (parsed.get("cover_letter") or "").strip()
+        except Exception:
+            pass
+    if not cover_text and cl_path and Path(cl_path).exists():
+        cover_text = extract_text_from_file(cl_path)
+
+    return TailoredDocumentsResponse(
+        has_cv=bool(cv_path and Path(cv_path).exists()),
+        has_cover_letter=bool(cl_path and Path(cl_path).exists()),
+        cover_letter_text=cover_text,
+        cv_filename=Path(cv_path).name if cv_path else "",
+        cover_letter_filename=Path(cl_path).name if cl_path else "",
+    )
+
+
+@router.get("/applications/{application_id}/documents/{doc_type}")
+def download_tailored_document(
+    application_id: int,
+    doc_type: str,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    """Download tailored CV or cover letter (authenticated)."""
+    app = _owned_application(db, application_id, profile)
+    if doc_type == "cv":
+        path = (app.tailored_cv_path or "").strip()
+        label = "cv"
+    elif doc_type in ("cover-letter", "cover_letter"):
+        path = (app.tailored_cover_letter_path or "").strip()
+        label = "cover-letter"
+    else:
+        raise HTTPException(status_code=400, detail="Unknown document type")
+
+    if not path or not Path(path).exists():
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Ensure the file lives under our generated/uploads dirs (path traversal guard).
+    resolved = Path(path).resolve()
+    allowed_roots = [
+        Path(settings.generated_dir).resolve(),
+        Path(settings.uploads_dir).resolve(),
+    ]
+    if not any(str(resolved).startswith(str(root)) for root in allowed_roots):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    media = "application/pdf" if resolved.suffix.lower() == ".pdf" else "text/plain"
+    return FileResponse(
+        path=str(resolved),
+        media_type=media,
+        filename=resolved.name,
+        headers={"Content-Disposition": f'inline; filename="{resolved.name}"'},
+    )
 
 
 @router.patch("/applications/{application_id}/status")

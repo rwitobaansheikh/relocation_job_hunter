@@ -1,8 +1,33 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import OnboardingGuide from '../components/OnboardingGuide'
 import { useProfile } from '../ProfileContext'
 import HelpButton from '../components/HelpButton'
+
+const DASHBOARD_STEPS = [
+  {
+    step: 1,
+    title: 'Set up your profile',
+    body: 'Upload your CV and cover letter, then add target roles and countries.',
+    to: '/app/profile',
+    linkLabel: 'Open Profile →',
+  },
+  {
+    step: 2,
+    title: 'Search for one location',
+    body: 'Run a job search for a single country or city. Results save to Applications.',
+    to: '/app/jobs',
+    linkLabel: 'Search jobs →',
+  },
+  {
+    step: 3,
+    title: 'Tailor & apply',
+    body: 'Tailor documents for a role, review your CV and cover letter, then send outreach.',
+    to: '/app/applications',
+    linkLabel: 'Go to Applications →',
+  },
+]
 
 export default function Dashboard() {
   const { profile, loading } = useProfile()
@@ -40,6 +65,14 @@ export default function Dashboard() {
     <div>
       <h2 className="page-title">Dashboard</h2>
       <p className="page-subtitle">Track your job hunt for {profile.full_name}</p>
+
+      {(stats?.total === 0 || !stats) && (
+        <OnboardingGuide
+          storageKey="jh_onboarding_dashboard"
+          title="Welcome — here’s how to land your first application"
+          steps={DASHBOARD_STEPS}
+        />
+      )}
 
       {stats && (
         <div className="stats-grid">

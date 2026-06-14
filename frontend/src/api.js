@@ -125,6 +125,17 @@ export const api = {
     const qs = params.toString()
     return request(`/applications${qs ? `?${qs}` : ''}`)
   },
+  getTailoredDocuments: (applicationId) => request(`/applications/${applicationId}/documents`),
+  fetchTailoredDocument: async (applicationId, docType) => {
+    const headers = {}
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`
+    const res = await fetch(`${API_BASE}/applications/${applicationId}/documents/${docType}`, { headers })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }))
+      throw new Error(err.detail || 'Failed to load document')
+    }
+    return res.blob()
+  },
   deleteAllApplications: () => request('/applications', { method: 'DELETE' }),
   tailorDocuments: (applicationIds) =>
     request('/applications/tailor', { method: 'POST', body: JSON.stringify({ application_ids: applicationIds }) }),

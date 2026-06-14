@@ -349,6 +349,14 @@ class JobResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TailoredDocumentsResponse(BaseModel):
+    has_cv: bool = False
+    has_cover_letter: bool = False
+    cover_letter_text: str = ""
+    cv_filename: str = ""
+    cover_letter_filename: str = ""
+
+
 class JobApplicationResponse(BaseModel):
     id: int
     user_profile_id: int
