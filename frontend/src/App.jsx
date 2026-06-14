@@ -16,6 +16,7 @@ import Billing from './pages/Billing'
 import Settings from './pages/Settings'
 import Feedback from './pages/Feedback'
 import Admin from './pages/Admin'
+import AuthCallback from './pages/AuthCallback'
 import HelpButton from './components/HelpButton'
 
 function PlanBadge() {
@@ -120,6 +121,7 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/app" element={<ProtectedLayout />}>
         <Route index element={<Dashboard />} />
         <Route path="profile" element={<Profile />} />

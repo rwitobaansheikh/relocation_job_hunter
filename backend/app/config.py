@@ -78,5 +78,13 @@ class Settings(BaseSettings):
     # Length of the free trial granted to new accounts.
     trial_days: int = 7
 
+    # --- OAuth (Google & LinkedIn) ---
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    linkedin_client_id: str = ""
+    linkedin_client_secret: str = ""
+    # Frontend callback URL after successful OAuth (e.g. http://localhost:5173/auth/callback)
+    oauth_frontend_callback_url: str = "http://localhost:5173/auth/callback"
+
 
 settings = Settings()

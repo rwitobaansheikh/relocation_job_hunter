@@ -12,6 +12,7 @@ from app.database import init_db
 from app.routes import auth_router, router
 from app.routes_admin import admin_router
 from app.routes_billing import billing_router, webhook_router
+from app.routes_oauth import oauth_router
 from app.services.scheduler import shutdown_scheduler, start_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -54,6 +55,7 @@ app.include_router(router)
 app.include_router(admin_router)
 app.include_router(billing_router)
 app.include_router(webhook_router)
+app.include_router(oauth_router)
 
 
 @app.get("/health")

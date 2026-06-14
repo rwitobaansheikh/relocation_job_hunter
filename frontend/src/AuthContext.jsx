@@ -41,13 +41,25 @@ export function AuthProvider({ children }) {
     return res.user
   }, [])
 
+  const loginWithToken = useCallback(async (token) => {
+    setToken(token)
+    try {
+      const u = await api.me()
+      setUser(u)
+      return u
+    } catch (err) {
+      setToken(null)
+      throw err
+    }
+  }, [])
+
   const logout = useCallback(() => {
     setToken(null)
     setUser(null)
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, loginWithToken, logout }}>
       {children}
     </AuthContext.Provider>
   )

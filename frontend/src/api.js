@@ -45,6 +45,8 @@ export const api = {
   register: (data) => request('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
   login: (data) => request('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
   me: () => request('/auth/me'),
+  getGoogleAuthUrl: () => request('/auth/google/url'),
+  getLinkedinAuthUrl: () => request('/auth/linkedin/url'),
   deleteAccount: (password) =>
     request('/account', { method: 'DELETE', body: JSON.stringify({ password, confirm: 'DELETE' }) }),
 
