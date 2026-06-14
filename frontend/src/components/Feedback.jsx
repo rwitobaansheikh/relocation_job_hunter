@@ -128,8 +128,7 @@ export function ContactSection() {
     <section id="contact" className="fb-section">
       <h2 className="section-heading">Contact us</h2>
       <p className="section-sub">
-        Questions, feedback or partnership ideas? Email{' '}
-        <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> or use the form below.
+        Questions, feedback or partnership ideas? Use the form below for contact.
       </p>
 
       <div className="card fb-form-card">
