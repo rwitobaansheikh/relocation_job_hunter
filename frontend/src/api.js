@@ -71,7 +71,7 @@ export const api = {
 
   streamSearchJobs: async (payload, onEvent) => {
     const headers = { 'Content-Type': 'application/json' }
-    const token = localStorage.getItem('token')
+    const token = getToken()
     if (token) headers['Authorization'] = `Bearer ${token}`
 
     const response = await fetch(`${API_BASE}/jobs/search`, {
