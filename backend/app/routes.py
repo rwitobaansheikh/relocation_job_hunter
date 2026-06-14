@@ -72,6 +72,7 @@ from app.services.role_suggester import suggest_roles
 from app.services.search_criteria_suggester import suggest_search_criteria
 from app.services.scraper.base import RawJob
 from app.services.url_importer import import_job_from_url
+from app.services.plans import effective_limits
 from app.services.usage import get_usage, incr_usage
 
 logger = logging.getLogger(__name__)
@@ -284,8 +285,16 @@ async def upload_cover_letter(
 
 
 @router.post("/profile/suggest-roles", response_model=RoleSuggestResponse)
-async def suggest_profile_roles(profile: UserProfile = Depends(get_current_profile)):
+async def suggest_profile_roles(
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
     """Analyze uploaded CV (+ cover letter) and suggest job roles to target."""
+    limits = effective_limits(profile.user)
+    if get_usage(db, profile.id, "llm") >= limits.llm_per_day:
+        raise HTTPException(status_code=429, detail="Daily AI usage limit reached for your plan.")
+    incr_usage(db, profile.id, "llm")
+    
     roles, message = await suggest_roles(profile)
     return RoleSuggestResponse(roles=roles, message=message)
 
@@ -293,9 +302,15 @@ async def suggest_profile_roles(profile: UserProfile = Depends(get_current_profi
 @router.post("/profile/suggest-search-criteria", response_model=SearchCriteriaSuggestResponse)
 async def suggest_profile_search_criteria(
     profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
 ):
     """Analyze CV + cover letter and suggest full job-search criteria for high-volume,
     relevant results (roles, locations, seniority, freshness, salary)."""
+    limits = effective_limits(profile.user)
+    if get_usage(db, profile.id, "llm") >= limits.llm_per_day:
+        raise HTTPException(status_code=429, detail="Daily AI usage limit reached for your plan.")
+    incr_usage(db, profile.id, "llm")
+
     criteria, message = await suggest_search_criteria(profile)
     return SearchCriteriaSuggestResponse(message=message, **criteria)
 
@@ -417,6 +432,10 @@ def add_manual_job(
     db: Session = Depends(get_db),
 ):
     """Create a job + application from user-provided (and/or imported) details."""
+    limits = effective_limits(profile.user)
+    if get_usage(db, profile.id, "manual") >= limits.manual_per_day:
+        raise HTTPException(status_code=429, detail="Daily manual application limit reached for your plan.")
+    
     url = request.url.strip()
     if not url.lower().startswith(("http://", "https://")):
         url = "https://" + url
@@ -495,6 +514,7 @@ def add_manual_job(
             status="discovered",
         )
         db.add(app)
+        incr_usage(db, profile.id, "manual")
     db.commit()
 
     return (
@@ -575,6 +595,8 @@ async def tailor_documents(
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
+    limits = effective_limits(profile.user)
+    
     generator = DocumentGenerator()
     if request.application_ids:
         # Restrict to applications the user actually owns.
@@ -600,8 +622,21 @@ async def tailor_documents(
         )
         application_ids = [a.id for a in apps]
 
+    # Limit by what they have left
+    used_tailor = get_usage(db, profile.id, "tailor")
+    remaining_tailor = max(0, limits.tailor_per_day - used_tailor)
+    
+    if len(application_ids) > remaining_tailor:
+        application_ids = application_ids[:remaining_tailor]
+        
+    if not application_ids and request.application_ids:
+        raise HTTPException(status_code=429, detail="Daily document tailoring limit reached for your plan.")
+
     try:
-        return await generator.tailor_batch(db, application_ids)
+        results = await generator.tailor_batch(db, application_ids)
+        for _ in results:
+            incr_usage(db, profile.id, "tailor")
+        return results
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -612,10 +647,16 @@ async def tailor_single(
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
+    limits = effective_limits(profile.user)
+    if get_usage(db, profile.id, "tailor") >= limits.tailor_per_day:
+        raise HTTPException(status_code=429, detail="Daily document tailoring limit reached for your plan.")
+
     _owned_application(db, application_id, profile)
     generator = DocumentGenerator()
     try:
-        return await generator.tailor_for_application(db, application_id)
+        result = await generator.tailor_for_application(db, application_id)
+        incr_usage(db, profile.id, "tailor")
+        return result
     except ValueError as exc:
         message = str(exc)
         if "not found" in message.lower():

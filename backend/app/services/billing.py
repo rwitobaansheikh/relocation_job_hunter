@@ -115,6 +115,18 @@ def create_portal_session(db: Session, user: User) -> str:
     return session["url"]
 
 
+def sync_user_subscription(db: Session, user: User) -> None:
+    """Proactively sync the user's subscription from Stripe."""
+    if not is_configured() or not user.stripe_customer_id:
+        return
+    try:
+        client = _client()
+        subs = client.Subscription.list(customer=user.stripe_customer_id, status="all", limit=1)
+        if subs and subs.data:
+            _apply_subscription(db, subs.data[0])
+    except Exception as exc:
+        logger.warning("Failed to sync subscription for user %s: %s", user.id, exc)
+
 def _tier_from_price(price_id: Optional[str]) -> Optional[str]:
     if not price_id:
         return None

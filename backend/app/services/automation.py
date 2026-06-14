@@ -126,12 +126,27 @@ class AutomationService:
                 )
                 .all()
             )
-            to_tailor = [
-                a.id for a in discovered if _job_matches_role(a.job, loop.role)
-            ][: (loop.max_tailor_per_run or settings.default_max_tailor_per_run)]
-            tailored = await self.generator.tailor_batch(db, to_tailor)
-            run.jobs_tailored = len(tailored)
-            notes.append(f"tailored: {len(tailored)}")
+            
+            # Enforce daily tailor limits for this plan
+            tailor_limit = limits.tailor_per_day if limits else 10
+            used_tailor = get_usage(db, loop.user_profile_id, "tailor")
+            remaining_tailor = max(0, tailor_limit - used_tailor)
+            
+            loop_tailor_cap = loop.max_tailor_per_run or settings.default_max_tailor_per_run
+            tailor_batch_size = min(remaining_tailor, loop_tailor_cap)
+            
+            if tailor_batch_size > 0:
+                to_tailor = [
+                    a.id for a in discovered if _job_matches_role(a.job, loop.role)
+                ][:tailor_batch_size]
+                tailored = await self.generator.tailor_batch(db, to_tailor)
+                for _ in tailored:
+                    incr_usage(db, loop.user_profile_id, "tailor")
+                run.jobs_tailored = len(tailored)
+                notes.append(f"tailored: {len(tailored)}")
+            else:
+                run.jobs_tailored = 0
+                notes.append("tailor: plan limit reached")
 
             # 3) Send within the loop + plan caps.
             run.emails_sent = await self._send_within_caps(db, loop, limits, notes)

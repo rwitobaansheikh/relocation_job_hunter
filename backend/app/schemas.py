@@ -122,11 +122,15 @@ class BillingLimits(BaseModel):
     max_loops: int
     auto_per_loop_per_day: int
     manual_per_day: int
+    tailor_per_day: int
+    llm_per_day: int
 
 
 class BillingUsage(BaseModel):
     manual_today: int
     loops_active: int
+    tailor_today: int
+    llm_today: int
 
 
 class BillingResponse(BaseModel):

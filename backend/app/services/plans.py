@@ -17,6 +17,8 @@ class Limits:
     max_loops: int
     auto_per_loop_per_day: int
     manual_per_day: int
+    tailor_per_day: int
+    llm_per_day: int
 
     @property
     def can_automate(self) -> bool:
@@ -30,18 +32,18 @@ PAID_PLANS = ("basic", "standard", "pro")
 
 PLAN_LIMITS: dict[str, Limits] = {
     # 7-day free trial mirrors Basic.
-    "trial": Limits("trial", max_loops=1, auto_per_loop_per_day=5, manual_per_day=20),
-    "basic": Limits("basic", max_loops=1, auto_per_loop_per_day=5, manual_per_day=20),
-    "standard": Limits("standard", max_loops=3, auto_per_loop_per_day=20, manual_per_day=100),
-    "pro": Limits("pro", max_loops=5, auto_per_loop_per_day=25, manual_per_day=300),
+    "trial": Limits("trial", max_loops=1, auto_per_loop_per_day=5, manual_per_day=20, tailor_per_day=10, llm_per_day=50),
+    "basic": Limits("basic", max_loops=1, auto_per_loop_per_day=5, manual_per_day=20, tailor_per_day=10, llm_per_day=50),
+    "standard": Limits("standard", max_loops=3, auto_per_loop_per_day=20, manual_per_day=100, tailor_per_day=50, llm_per_day=250),
+    "pro": Limits("pro", max_loops=5, auto_per_loop_per_day=25, manual_per_day=300, tailor_per_day=150, llm_per_day=1000),
     # Lapsed trial / canceled subscription: locked until they subscribe.
-    "expired": Limits("expired", max_loops=0, auto_per_loop_per_day=0, manual_per_day=0),
+    "expired": Limits("expired", max_loops=0, auto_per_loop_per_day=0, manual_per_day=0, tailor_per_day=0, llm_per_day=0),
 }
 
 # Admin "unlimited access" override (still capped at 5 loops, still subject to
 # the shared-API global rate limiter).
 _BIG = 100_000
-UNLIMITED = Limits("unlimited", max_loops=MAX_LOOPS_HARD_CAP, auto_per_loop_per_day=_BIG, manual_per_day=_BIG)
+UNLIMITED = Limits("unlimited", max_loops=MAX_LOOPS_HARD_CAP, auto_per_loop_per_day=_BIG, manual_per_day=_BIG, tailor_per_day=_BIG, llm_per_day=_BIG)
 
 # Tier catalog shown on the billing/pricing page (USD base price).
 TIERS: list[dict] = [

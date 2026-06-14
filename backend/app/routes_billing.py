@@ -51,10 +51,17 @@ def get_billing(
     db: Session = Depends(get_db),
 ):
     country = request.headers.get("CF-IPCountry") or request.headers.get("cf-ipcountry")
+    
+    # Proactively sync subscription status if the user has a customer ID
+    # This ensures immediate updates after checkout returns to the app
+    billing.sync_user_subscription(db, user)
+    
     limits = effective_limits(user)
 
     profile = db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
     manual_today = get_usage(db, profile.id, "manual") if profile else 0
+    tailor_today = get_usage(db, profile.id, "tailor") if profile else 0
+    llm_today = get_usage(db, profile.id, "llm") if profile else 0
     loops_active = (
         db.query(AutomationLoop)
         .filter(
@@ -83,8 +90,15 @@ def get_billing(
             max_loops=limits.max_loops,
             auto_per_loop_per_day=limits.auto_per_loop_per_day,
             manual_per_day=limits.manual_per_day,
+            tailor_per_day=limits.tailor_per_day,
+            llm_per_day=limits.llm_per_day,
         ),
-        usage=BillingUsage(manual_today=manual_today, loops_active=loops_active),
+        usage=BillingUsage(
+            manual_today=manual_today, 
+            loops_active=loops_active,
+            tailor_today=tailor_today,
+            llm_today=llm_today
+        ),
         tiers=_tiers_for_country(country),
     )
 

@@ -77,7 +77,13 @@ export default function Billing() {
           </div>
           <div style={{ textAlign: 'right' }}>
             <div className="muted">
-              {data.usage.manual_today} / {data.limits.manual_per_day} manual applications used today
+              {data.usage.manual_today} / {data.limits.manual_per_day} manual applications today
+            </div>
+            <div className="muted">
+              {data.usage.tailor_today} / {data.limits.tailor_per_day} document tailoring today
+            </div>
+            <div className="muted">
+              {data.usage.llm_today} / {data.limits.llm_per_day} AI suggestions today
             </div>
             <div className="muted">
               {data.usage.loops_active} / {data.limits.max_loops} automation loops active
