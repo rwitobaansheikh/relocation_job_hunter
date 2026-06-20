@@ -49,12 +49,20 @@ class EmailService:
         self.finder = EmailFinder()
 
     @staticmethod
-    def _registered_email(profile) -> str:
-        """Inbox tied to the user's login — used for test sends, not SMTP identity."""
+    def _account_email(profile) -> str:
+        """Primary inbox for this user (login email, then profile contact email)."""
         user = getattr(profile, "user", None)
         if user and getattr(user, "email", None):
             return user.email.strip()
         return (getattr(profile, "email", None) or "").strip()
+
+    @staticmethod
+    def _registered_email(profile) -> str:
+        return EmailService._account_email(profile)
+
+    @staticmethod
+    def _sender_name(profile) -> str:
+        return (getattr(profile, "full_name", None) or "").strip() or "Job Hunter"
 
     async def send_outreach(
         self,
@@ -364,36 +372,34 @@ Best regards,
 
     @staticmethod
     def _smtp_config(profile) -> dict:
-        """Resolve the sending identity: the user's own SMTP credentials when
-        configured (hybrid model), otherwise the shared app-level credentials."""
-        user_email = ""
-        user = getattr(profile, "user", None)
-        if user and getattr(user, "email", None):
-            user_email = user.email.strip()
-        if not user_email:
-            user_email = (getattr(profile, "email", None) or "").strip()
-            
-        sender_name = getattr(profile, "full_name", "") or "Job Hunter"
-        from_address = f"{sender_name} <{user_email}>" if user_email else ""
+        """Resolve the sending identity from the user's own SMTP credentials."""
+        account_email = EmailService._account_email(profile)
+        sender_name = EmailService._sender_name(profile)
+        from_header = account_email
+        if sender_name and account_email:
+            from_header = f"{sender_name} <{account_email}>"
 
         password = decrypt_secret(getattr(profile, "smtp_password_enc", "") or "")
-        if getattr(profile, "smtp_user", "") and password:
-            host = profile.smtp_host or settings.smtp_host
-            smtp_user = profile.smtp_user
-            return {
-                "host": host,
-                "port": profile.smtp_port or settings.smtp_port,
-                "user": smtp_user,
-                "password": password,
-                "from": profile.smtp_from or from_address or smtp_user,
-            }
-        # Fall back to the shared, app-level mailbox.
+        smtp_user = (getattr(profile, "smtp_user", "") or "").strip()
+
+        if not smtp_user or not password:
+            raise ValueError(
+                "Configure your sending email in Settings: add your email address "
+                "and Gmail app password so messages are sent from your inbox."
+            )
+
+        if account_email and smtp_user.lower() != account_email.lower():
+            raise ValueError(
+                f"SMTP username ({smtp_user}) must match your account email "
+                f"({account_email}). Update Settings → Sending identity."
+            )
+
         return {
-            "host": settings.smtp_host,
-            "port": settings.smtp_port,
-            "user": settings.smtp_user,
-            "password": settings.smtp_password,
-            "from": from_address or settings.smtp_from or settings.smtp_user,
+            "host": profile.smtp_host or settings.smtp_host,
+            "port": profile.smtp_port or settings.smtp_port,
+            "user": smtp_user,
+            "password": password,
+            "from": (getattr(profile, "smtp_from", "") or "").strip() or from_header or smtp_user,
         }
 
     async def send_system_email(self, to: str, subject: str, body: str) -> None:
@@ -425,10 +431,6 @@ Best regards,
         msg["From"] = smtp["from"] or smtp["user"]
         msg["To"] = to
         msg["Subject"] = subject
-        
-        # Add Reply-To just in case the SMTP provider rewrites the From header
-        if smtp.get("from"):
-            msg.add_header("Reply-To", smtp["from"])
 
         msg.attach(MIMEText(body, "plain"))
 

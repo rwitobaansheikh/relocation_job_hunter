@@ -18,15 +18,9 @@ from app.services.cv_link_extractor import (
     format_links_for_prompt,
     get_project_links_for_profile,
 )
+from app.services.docx_renderer import document_filename, render_cover_letter_docx, render_resume_docx
 from app.services.llm import llm_available, llm_generate, resolve_gemini_api_key
 from app.services.job_analyzer import JobAnalyzer
-from app.services.pdf import markdown_to_pdf
-from app.services.resume_renderer import render_cover_letter, render_resume
-
-try:
-    import markdown as _markdown
-except Exception:  # pragma: no cover - optional dependency
-    _markdown = None
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +31,6 @@ _AI_FAILURE_MSG = (
     "AI tailoring failed — the local LLM may be offline or overloaded. "
     "Ensure Ollama is running and the configured model is pulled, then retry."
 )
-
-
-def _safe_filename(name: str) -> str:
-    cleaned = "".join(c for c in (name or "") if c.isalnum() or c in " -_").strip()
-    return cleaned or "document"
 
 
 def _strip_code_fences(text: str) -> str:
@@ -112,18 +101,6 @@ def _resume_usable(data: dict | None) -> bool:
     return bool(data) and _resume_word_count(data) >= 40
 
 
-def _markdown_to_html(text: str) -> str:
-    cleaned = _strip_code_fences(text)
-    if _markdown is not None:
-        try:
-            return _markdown.markdown(cleaned, extensions=["extra", "sane_lists", "nl2br"])
-        except Exception:  # pragma: no cover - defensive
-            pass
-    # Minimal fallback: paragraphs split on blank lines.
-    paragraphs = [p.strip().replace("\n", "<br>") for p in cleaned.split("\n\n") if p.strip()]
-    return "".join(f"<p>{p}</p>" for p in paragraphs)
-
-
 class DocumentGenerator:
     def __init__(self) -> None:
         self.analyzer = JobAnalyzer()
@@ -169,9 +146,6 @@ class DocumentGenerator:
             await self._generate_cover_letter(profile, job, cover_base, api_key=api_key)
         )
 
-        name = _safe_filename(profile.full_name)
-        contact = self._contact(profile)
-
         if not _resume_usable(cv_data):
             logger.warning(
                 "Tailored CV for application %s unusable (AI empty or truncated).",
@@ -180,9 +154,9 @@ class DocumentGenerator:
             raise ValueError(_AI_FAILURE_MSG)
 
         cv_data = self._apply_profile_identity(cv_data, profile, cv_text)
-        cv_pdf = out_dir / f"{name} - CV.pdf"
-        if not render_resume(cv_data, str(cv_pdf)):
-            raise ValueError("Failed to render the tailored CV to PDF. Please retry.")
+        cv_docx = out_dir / document_filename(profile.full_name, job.title, "CV")
+        if not render_resume_docx(cv_data, str(cv_docx)):
+            raise ValueError("Failed to render the tailored CV to Word format. Please retry.")
 
         if not _looks_usable(tailored_cl):
             logger.warning(
@@ -191,14 +165,11 @@ class DocumentGenerator:
             )
             raise ValueError(_AI_FAILURE_MSG)
 
-        cl_pdf = out_dir / f"{name} - Cover Letter.pdf"
-        body_html = _markdown_to_html(tailored_cl)
-        if render_cover_letter(profile.full_name, contact, body_html, str(cl_pdf)):
-            cl_path = str(cl_pdf)
-        else:
-            cl_path = self._write_document(tailored_cl, out_dir, f"{name} - Cover Letter")
-            if not cl_path:
-                raise ValueError("Failed to render the tailored cover letter. Please retry.")
+        cl_docx = out_dir / document_filename(profile.full_name, job.title, "Cover-Letter")
+        contact = self._contact(profile)
+        if not render_cover_letter_docx(profile.full_name, contact, tailored_cl, str(cl_docx)):
+            raise ValueError("Failed to render the tailored cover letter to Word format. Please retry.")
+        cl_path = str(cl_docx)
 
         # Optional match analysis (does not block tailoring success).
         analysis = None
@@ -214,14 +185,17 @@ class DocumentGenerator:
         except Exception as exc:
             logger.warning("Match analysis skipped for application %s: %s", application_id, exc)
 
-        application.tailored_cv_path = str(cv_pdf)
+        application.tailored_cv_path = str(cv_docx)
         application.tailored_cover_letter_path = cl_path
         if analysis:
             try:
                 application.ai_match_score = int(analysis.get("match_score") or 0)
             except (TypeError, ValueError):
                 application.ai_match_score = 0
+            analysis["cover_letter"] = tailored_cl
             application.analysis_json = json.dumps(analysis)
+        else:
+            application.analysis_json = json.dumps({"cover_letter": tailored_cl})
         application.status = ApplicationStatus.TAILORED.value
         db.commit()
         db.refresh(application)
@@ -243,28 +217,27 @@ class DocumentGenerator:
             raise ValueError(errors[0])
         return results
 
-    def _write_document(self, markdown_text: str, out_dir, base_name: str) -> str:
-        """Write the document as PDF, falling back to .txt if PDF deps are missing."""
-        pdf_path = out_dir / f"{base_name}.pdf"
-        if markdown_to_pdf(markdown_text, str(pdf_path)):
-            return str(pdf_path)
+    def _write_document(self, markdown_text: str, out_dir, base_name: str, job_title: str = "") -> str:
+        """Write the document as .docx (plain paragraphs)."""
+        docx_path = out_dir / document_filename(base_name.replace(" ", "-"), job_title or "Role", "Document")
+        contact = {"email": "", "phone": "", "linkedin": "", "location": ""}
+        if render_cover_letter_docx("", contact, markdown_text, str(docx_path)):
+            return str(docx_path)
         txt_path = out_dir / f"{base_name}.txt"
         txt_path.write_text(markdown_text, encoding="utf-8")
         return str(txt_path)
 
     def _fallback_document(
-        self, original_text: str, original_path: str, out_dir, base_name: str
+        self, original_text: str, original_path: str, out_dir, base_name: str, job_title: str = ""
     ) -> str:
-        """Copy/render an uploaded document into the per-application output dir.
-
-        Never return the original upload path as a 'tailored' path — callers must
-        only use this for explicit, non-AI fallbacks."""
-        dest = out_dir / f"{base_name}.pdf"
-        if original_path and Path(original_path).exists():
-            shutil.copy2(original_path, dest)
+        """Copy an uploaded document into the per-application output dir when needed."""
+        source = Path(original_path) if original_path else None
+        if source and source.exists() and source.suffix.lower() == ".docx":
+            dest = out_dir / document_filename(base_name, job_title or "Role", "CV")
+            shutil.copy2(source, dest)
             return str(dest)
         if original_text and original_text.strip():
-            return self._write_document(original_text, out_dir, f"{base_name} (original)")
+            return self._write_document(original_text, out_dir, base_name, job_title)
         return ""
 
     @staticmethod
@@ -334,45 +307,53 @@ class DocumentGenerator:
   ]
 }"""
 
-        prompt = f"""You are an expert CV writer. Produce a tailored, truthful, ONE-PAGE CV as STRUCTURED JSON only.
+        prompt = f"""You are an expert CV writer. Rewrite the source CV into an ATS-friendly version tailored to the target role.
 
-Return ONLY a single JSON object matching this exact schema (no markdown, no code fences, no commentary):
+TARGET ROLE: {job.title}
+JOB DESCRIPTION (use for keyword matching):
+{(job.description or '')[:3000]}
+
+Tailoring means re-emphasising, reordering, and rewording REAL content from the original CV. Never invent employers, dates, tools, or results.
+
+Return ONLY a single JSON object matching this schema (no markdown fences, no commentary):
 {schema}
 
-RULES:
-- Output valid JSON only. Use straight quotes. No trailing commas.
-- Allowed section types: "summary", "skills", "experience", "projects", "education".
-- Order the "sections" array to best match the target job (put the most relevant sections first). Always include "summary" first.
-- Be truthful: never fabricate experience, employers, or metrics not supported by the source CV.
-- Tailor wording and emphasis to the job description; lead bullets with strong action verbs and quantified impact.
-- Keep it concise enough to fit one page (typically 3-5 experience/project bullets each).
-- Do NOT include placeholders or empty bracket tokens.
-- For projects: include a "links" array. NEVER invent or guess URLs — copy ONLY from ORIGINAL PROJECT LINKS below. Use the exact label + url pairs provided.
+ATS & CONTENT RULES:
+1. Maximum 2 A4 pages worth of content (700-800 words total). Cut the least-relevant bullets/projects instead of padding.
+2. UK English spelling throughout (optimise, organise, specialise, programme for courses).
+3. Write a 3-4 sentence professional summary specific to the target role from real achievements in the source CV.
+4. Reorder/regroup skills so keywords relevant to the target role and job description come first.
+5. For each job, select 2-4 bullets most relevant to the target role; lightly reword; cut the rest.
+6. Pick the most relevant projects and angle bullets toward the role (same facts, different emphasis).
+7. Experience in strict reverse chronological order (most recent first).
+8. Every job entry needs subheading = job title and heading = organisation. Every education entry needs a full date range.
+9. Use plain hyphens in date ranges (e.g. Jan 2020 - Mar 2023), never em/en dashes.
+10. Projects must be clearly personal/academic (not paid employment). Use date field for year.
+11. Avoid AI clichés: leverage, robust, seamless, cutting-edge, dynamic, passionate, results-driven, synergy.
+12. Vary bullet structure; do not start consecutive bullets with the same verb; expand acronyms on first use.
+13. Describe code in plain English; no literal class/variable names; no square-bracket placeholders.
+14. Allowed section types only: summary, skills, experience, projects, education.
+15. Use section titles suitable for ATS: Professional Summary, Key Skills, Professional Experience, Projects, Education.
+16. For projects: include "links" array only from ORIGINAL PROJECT LINKS below — never invent URLs.
 
-ORIGINAL PROJECT LINKS (copy exactly; do not modify URLs):
+ORIGINAL PROJECT LINKS (copy exactly):
 {links_prompt or "(none found — omit links arrays)"}
 
-SOURCE CV (extract real content from here):
+SOURCE CV:
 {cv_text[:6000]}
 
-CANDIDATE:
+CANDIDATE CONTACT (use in contact object):
 - Name: {profile.full_name}
 - Email: {profile.email} | Phone: {profile.phone} | LinkedIn: {profile.linkedin_url} | Location: {profile.location}
 - Skills: {profile.skills}
-- Professional Summary: {profile.summary}
 - Open to relocation to: {profile.target_countries}
 
-TARGET JOB:
-- Title: {job.title}
-- Company: {job.company}
-- Description: {(job.description or '')[:3000]}
-
-IMPROVEMENT SUGGESTIONS TO ADDRESS (truthfully): {gaps_text}
+IMPROVEMENT SUGGESTIONS (address truthfully): {gaps_text}
 """
 
         result = await llm_generate(
             prompt,
-            system="You are an expert CV writer that outputs strict JSON.",
+            system="You are an expert CV writer producing ATS-friendly CVs as strict JSON for Word export.",
             temperature=0.4,
             max_tokens=4096,
             api_key=api_key,

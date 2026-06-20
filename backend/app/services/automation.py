@@ -223,9 +223,7 @@ class AutomationService:
 
 
 def _has_sending_identity(profile: UserProfile) -> bool:
-    has_own = bool(profile.smtp_user and profile.smtp_password_enc)
-    has_shared = bool(settings.smtp_user and settings.smtp_password)
-    return has_own or has_shared
+    return bool(profile.smtp_user and profile.smtp_password_enc)
 
 
 async def run_due_loops(db: Session) -> int:

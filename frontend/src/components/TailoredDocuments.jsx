@@ -1,12 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api'
 
 export default function TailoredDocuments({ applicationId, open, onClose }) {
   const [meta, setMeta] = useState(null)
-  const [cvUrl, setCvUrl] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const cvUrlRef = useRef(null)
 
   useEffect(() => {
     if (!open || !applicationId) return undefined
@@ -15,33 +13,15 @@ export default function TailoredDocuments({ applicationId, open, onClose }) {
       setLoading(true)
       setError(null)
       setMeta(null)
-      if (cvUrlRef.current) {
-        URL.revokeObjectURL(cvUrlRef.current)
-        cvUrlRef.current = null
-        setCvUrl(null)
-      }
       try {
         const data = await api.getTailoredDocuments(applicationId)
         setMeta(data)
-        if (data.has_cv) {
-          const blob = await api.fetchTailoredDocument(applicationId, 'cv')
-          const url = URL.createObjectURL(blob)
-          cvUrlRef.current = url
-          setCvUrl(url)
-        }
       } catch (err) {
         setError(err.message)
       }
       setLoading(false)
     }
     load()
-
-    return () => {
-      if (cvUrlRef.current) {
-        URL.revokeObjectURL(cvUrlRef.current)
-        cvUrlRef.current = null
-      }
-    }
   }, [open, applicationId])
 
   const handleDownload = async (docType, filename) => {
@@ -50,7 +30,7 @@ export default function TailoredDocuments({ applicationId, open, onClose }) {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = filename || 'document.pdf'
+      a.download = filename || 'document.docx'
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {
@@ -74,6 +54,9 @@ export default function TailoredDocuments({ applicationId, open, onClose }) {
 
       {!loading && meta && (
         <>
+          <p className="muted" style={{ marginBottom: '0.75rem' }}>
+            Documents are generated as Word (.docx) files for ATS compatibility. Download to open in Microsoft Word.
+          </p>
           <div className="tailored-docs-panel__actions">
             {meta.has_cv && (
               <button
@@ -81,7 +64,7 @@ export default function TailoredDocuments({ applicationId, open, onClose }) {
                 className="btn-secondary btn-sm"
                 onClick={() => handleDownload('cv', meta.cv_filename)}
               >
-                Download CV
+                Download CV (.docx)
               </button>
             )}
             {meta.has_cover_letter && (
@@ -90,21 +73,14 @@ export default function TailoredDocuments({ applicationId, open, onClose }) {
                 className="btn-secondary btn-sm"
                 onClick={() => handleDownload('cover-letter', meta.cover_letter_filename)}
               >
-                Download Cover Letter
+                Download Cover Letter (.docx)
               </button>
             )}
           </div>
 
-          {cvUrl && (
-            <div className="tailored-docs-panel__preview">
-              <div className="tailored-docs-panel__label">CV preview</div>
-              <iframe title="Tailored CV" src={cvUrl} />
-            </div>
-          )}
-
           {meta.cover_letter_text && (
             <div className="tailored-docs-panel__letter">
-              <div className="tailored-docs-panel__label">Cover letter</div>
+              <div className="tailored-docs-panel__label">Cover letter preview</div>
               <div className="tailored-docs-panel__letter-body">{meta.cover_letter_text}</div>
             </div>
           )}

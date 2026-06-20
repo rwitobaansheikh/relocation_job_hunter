@@ -18,13 +18,22 @@ export default function Settings() {
   useEffect(() => {
     api
       .getSettings()
-      .then((s) => {
+      .then(async (s) => {
         setSettings(s)
+        let defaultUser = s.smtp_user || ''
+        if (!defaultUser) {
+          try {
+            const profile = await api.getProfile()
+            defaultUser = profile.email || ''
+          } catch {
+            defaultUser = ''
+          }
+        }
         setForm({
           smtp_host: s.smtp_host || '',
           smtp_port: s.smtp_port || 587,
-          smtp_user: s.smtp_user || '',
-          smtp_from: s.smtp_from || '',
+          smtp_user: defaultUser,
+          smtp_from: s.smtp_from || defaultUser,
           smtp_password: '',
           gemini_api_key: '',
           rocketreach_api_key: '',
@@ -79,7 +88,8 @@ export default function Settings() {
       <div className="card">
         <h3 style={{ marginBottom: '1rem' }}>Sending identity (SMTP)</h3>
         <p className="muted" style={{ marginBottom: '1rem' }}>
-          Outreach emails are sent from your own mailbox. For Gmail, use an App Password.
+          Outreach and test emails are sent from your own mailbox ({form.smtp_user || 'your account email'}).
+          The SMTP username must match your login email. For Gmail, use an App Password.
         </p>
         <div className="form-group">
           <label>SMTP Host</label>

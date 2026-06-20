@@ -359,6 +359,10 @@ def update_settings(
     # Secrets: empty string clears, non-empty encrypts, omitted leaves as-is.
     if "smtp_password" in payload:
         profile.smtp_password_enc = encrypt_secret(payload.pop("smtp_password") or "")
+        if not (payload.get("smtp_user") or profile.smtp_user):
+            profile.smtp_user = profile.email or ""
+        if not (payload.get("smtp_from") or profile.smtp_from):
+            profile.smtp_from = profile.email or ""
     if "gemini_api_key" in payload:
         profile.gemini_api_key_enc = encrypt_secret(payload.pop("gemini_api_key") or "")
     if "rocketreach_api_key" in payload:
@@ -635,7 +639,11 @@ def download_tailored_document(
     if not any(str(resolved).startswith(str(root)) for root in allowed_roots):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    media = "application/pdf" if resolved.suffix.lower() == ".pdf" else "text/plain"
+    media_types = {
+        ".pdf": "application/pdf",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }
+    media = media_types.get(resolved.suffix.lower(), "text/plain")
     return FileResponse(
         path=str(resolved),
         media_type=media,
