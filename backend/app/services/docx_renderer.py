@@ -276,6 +276,56 @@ def _plain_paragraphs_from_text(doc: Document, text: str) -> None:
             _set_run_font(run)
 
 
+def strip_cover_letter_header(body_text: str, name: str, contact: dict) -> str:
+    """Remove a leading name/contact block when the LLM repeats the template header."""
+    text = (body_text or "").strip()
+    if not text:
+        return text
+
+    lines = text.splitlines()
+    email = (contact.get("email") or "").strip().lower()
+    phone_digits = re.sub(r"\D", "", contact.get("phone") or "")
+    name_key = (name or "").strip().lower()
+
+    peel_through = 0
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            peel_through = index + 1
+            continue
+
+        plain = re.sub(r"^[#*\s]+", "", stripped).strip()
+        low = plain.lower()
+
+        if re.match(r"^(hi|hello|dear|to whom)", low):
+            break
+
+        if name_key and low == name_key:
+            peel_through = index + 1
+            continue
+
+        if email and email in low:
+            peel_through = index + 1
+            continue
+
+        if phone_digits and len(phone_digits) >= 7 and phone_digits[-7:] in re.sub(r"\D", "", low):
+            peel_through = index + 1
+            continue
+
+        if "linkedin.com" in low and peel_through > 0:
+            peel_through = index + 1
+            continue
+
+        if plain.count("|") >= 2 and peel_through > 0:
+            peel_through = index + 1
+            continue
+
+        break
+
+    trimmed = "\n".join(lines[peel_through:]).strip()
+    return trimmed or text
+
+
 def render_resume_docx(data: dict, out_path: str) -> bool:
     """Render structured resume JSON to Word — CV360 ATS layout."""
     try:
@@ -440,7 +490,8 @@ def render_cover_letter_docx(name: str, contact: dict, body_text: str, out_path:
             (body_text or "").strip(),
             flags=re.DOTALL,
         )
-        _plain_paragraphs_from_text(doc, cleaned.strip())
+        cleaned = strip_cover_letter_header(cleaned.strip(), name, contact)
+        _plain_paragraphs_from_text(doc, cleaned)
 
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         doc.save(out_path)

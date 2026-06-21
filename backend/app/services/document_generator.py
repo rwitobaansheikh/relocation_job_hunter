@@ -432,6 +432,7 @@ Description: {job.description[:2000]}
 RELOCATION KEYWORDS IN JOB: {job.relocation_keywords}
 
 FORMATTING RULES (critical):
+- Do NOT include your name, email, phone, LinkedIn, or address at the top — the Word template adds a professional header automatically.
 - Output clean Markdown, NOT one block of text.
 - Separate every paragraph with a blank line.
 - Open with a greeting line (e.g. "Hi hiring team at {job.company},") followed by a blank line.

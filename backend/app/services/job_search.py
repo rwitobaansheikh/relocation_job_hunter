@@ -176,94 +176,192 @@ class JobSearchService:
                 yield {**item, "stats": stats}
                 continue
 
-            job = item
-            smin, smax, currency, salary_label = parse_salary(" ".join([job.title, job.description]))
-            job.salary_min, job.salary_max = smin, smax
-            job.salary_currency, job.salary_text = currency, salary_label
-
-            excluded, _reason = self.matcher.is_excluded(job, [filters.location] if filters.location else None)
-            if excluded:
-                stats["jobs_filtered"] += 1
-                continue
-
-            if job.posted_at and job.posted_at < cutoff:
-                stats["jobs_filtered"] += 1
-                continue
-
-            if not self.matcher.matches_locations(job, [filters.location] if filters.location else locations):
-                stats["jobs_filtered"] += 1
-                continue
-
-            seniority_level = self.matcher.classify_seniority(job)
-            if not self.matcher.matches_seniority(job, filters.seniority_levels):
-                stats["jobs_filtered"] += 1
-                continue
-
-            if not self.matcher.matches_work_types(job, filters.work_types):
-                stats["jobs_filtered"] += 1
-                continue
-
-            offers_relocation, relocation_kw = self.matcher.check_relocation(job)
-            score = self.matcher.score_relevance(job, profile)
-            
-            stats["jobs_found"] += 1
-
-            existing = db.query(Job).filter(Job.external_id == job.external_id).first()
-            if existing:
-                existing.relevance_score = score
-                existing.seniority_level = seniority_level
-                existing.salary_min = job.salary_min
-                existing.salary_max = job.salary_max
-                existing.salary_currency = job.salary_currency
-                existing.salary_text = job.salary_text
-                job_record = existing
-            else:
-                job_record = Job(
-                    external_id=job.external_id,
-                    source=job.source,
-                    title=job.title,
-                    company=job.company,
-                    company_domain=job.company_domain,
-                    location=job.location,
-                    description=job.description,
-                    url=job.url,
-                    experience_level=seniority_level,
-                    seniority_level=seniority_level,
-                    offers_relocation=offers_relocation,
-                    relocation_keywords=relocation_kw,
-                    salary_min=job.salary_min,
-                    salary_max=job.salary_max,
-                    salary_currency=job.salary_currency,
-                    salary_text=job.salary_text,
-                    posted_at=job.posted_at,
-                    relevance_score=score,
-                )
-                db.add(job_record)
-                db.flush()
-
-            app_exists = db.query(JobApplication).filter(JobApplication.user_profile_id == user_profile_id, JobApplication.job_id == job_record.id).first()
-            if not app_exists:
-                db.add(JobApplication(user_profile_id=user_profile_id, job_id=job_record.id, status="discovered"))
-                stats["jobs_stored"] += 1
-
-            db.commit()
-
-            if stats["jobs_stored"] >= max_jobs:
+            event, stop = self._process_scraped_job(
+                db,
+                profile,
+                user_profile_id,
+                item,
+                filters,
+                locations,
+                cutoff,
+                stats,
+                max_jobs,
+            )
+            if event:
+                yield event
+            if stop:
                 yield {"type": "done", "stats": stats, "message": "Reached the maximum jobs for this search."}
                 return
 
-            yield {
-                "type": "job",
-                "job": {
-                    "title": job.title,
-                    "company": job.company,
-                    "location": job.location,
-                    "url": job.url,
-                },
-                "stats": stats,
-            }
+        yield {
+            "type": "progress",
+            "message": "Searching RemoteOK, Remotive, WeWorkRemotely, and Relocate.me…",
+            "location": linkedin_geo[0],
+            "roles": roles,
+            "stats": stats,
+        }
+
+        board_jobs = await self._fetch_board_scrapers(roles)
+        for job in board_jobs:
+            if await cancelled():
+                yield {"type": "cancelled", "stats": stats, "message": "Search stopped."}
+                return
+            if job.external_id in existing_external_ids:
+                continue
+
+            event, stop = self._process_scraped_job(
+                db,
+                profile,
+                user_profile_id,
+                job,
+                filters,
+                locations,
+                cutoff,
+                stats,
+                max_jobs,
+            )
+            if event:
+                yield event
+            if stop:
+                yield {"type": "done", "stats": stats, "message": "Reached the maximum jobs for this search."}
+                return
 
         yield {"type": "done", "stats": stats, "message": "Search complete."}
+
+    def _process_scraped_job(
+        self,
+        db: Session,
+        profile: UserProfile,
+        user_profile_id: int,
+        job: RawJob,
+        filters: SearchFilters,
+        locations: list[str],
+        cutoff: datetime,
+        stats: dict,
+        max_jobs: int,
+    ) -> tuple[dict | None, bool]:
+        smin, smax, currency, salary_label = parse_salary(" ".join([job.title, job.description]))
+        job.salary_min, job.salary_max = smin, smax
+        job.salary_currency, job.salary_text = currency, salary_label
+
+        excluded, _reason = self.matcher.is_excluded(job, [filters.location] if filters.location else None)
+        if excluded:
+            stats["jobs_filtered"] += 1
+            return None, False
+
+        if job.posted_at and job.posted_at < cutoff:
+            stats["jobs_filtered"] += 1
+            return None, False
+
+        if not self.matcher.matches_locations(job, [filters.location] if filters.location else locations):
+            stats["jobs_filtered"] += 1
+            return None, False
+
+        seniority_level = self.matcher.classify_seniority(job)
+        if not self.matcher.matches_seniority(job, filters.seniority_levels):
+            stats["jobs_filtered"] += 1
+            return None, False
+
+        if not self.matcher.matches_work_types(job, filters.work_types):
+            stats["jobs_filtered"] += 1
+            return None, False
+
+        offers_relocation, relocation_kw = self.matcher.check_relocation(job)
+        score = self.matcher.score_relevance(job, profile)
+
+        stats["jobs_found"] += 1
+
+        existing = db.query(Job).filter(Job.external_id == job.external_id).first()
+        if existing:
+            existing.relevance_score = score
+            existing.seniority_level = seniority_level
+            existing.salary_min = job.salary_min
+            existing.salary_max = job.salary_max
+            existing.salary_currency = job.salary_currency
+            existing.salary_text = job.salary_text
+            job_record = existing
+        else:
+            job_record = Job(
+                external_id=job.external_id,
+                source=job.source,
+                title=job.title,
+                company=job.company,
+                company_domain=job.company_domain,
+                location=job.location,
+                description=job.description,
+                url=job.url,
+                experience_level=seniority_level,
+                seniority_level=seniority_level,
+                offers_relocation=offers_relocation,
+                relocation_keywords=relocation_kw,
+                salary_min=job.salary_min,
+                salary_max=job.salary_max,
+                salary_currency=job.salary_currency,
+                salary_text=job.salary_text,
+                posted_at=job.posted_at,
+                relevance_score=score,
+            )
+            db.add(job_record)
+            db.flush()
+
+        app_exists = (
+            db.query(JobApplication)
+            .filter(
+                JobApplication.user_profile_id == user_profile_id,
+                JobApplication.job_id == job_record.id,
+            )
+            .first()
+        )
+        if not app_exists:
+            db.add(
+                JobApplication(
+                    user_profile_id=user_profile_id,
+                    job_id=job_record.id,
+                    status="discovered",
+                )
+            )
+            stats["jobs_stored"] += 1
+
+        db.commit()
+
+        event = {
+            "type": "job",
+            "job": {
+                "title": job.title,
+                "company": job.company,
+                "location": job.location,
+                "url": job.url,
+            },
+            "stats": stats,
+        }
+        return event, stats["jobs_stored"] >= max_jobs
+
+    async def _fetch_board_scrapers(
+        self,
+        roles: list[str] | None,
+        limit: int = 150,
+    ) -> list[RawJob]:
+        """Fetch from non-LinkedIn boards (RemoteOK, Remotive, etc.)."""
+        tasks = []
+        for scraper in self.scrapers:
+            if isinstance(scraper, LinkedInScraper):
+                continue
+            tasks.append(scraper.fetch_jobs(limit=limit, roles=roles))
+        if not tasks:
+            return []
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        jobs: list[RawJob] = []
+        seen: set[str] = set()
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning("Board scraper failed: %s", result)
+                continue
+            for job in result:
+                if job.external_id not in seen:
+                    seen.add(job.external_id)
+                    jobs.append(job)
+        return jobs
 
     @staticmethod
     def _existing_external_ids(db: Session, user_profile_id: int) -> set[str]:

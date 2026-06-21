@@ -115,7 +115,6 @@ class LinkedInScraper:
                     if not found:
                         break
 
-                    found_new_this_page = False
                     for card in found:
                         if await cancelled():
                             return
@@ -127,7 +126,6 @@ class LinkedInScraper:
                             cards[job_id] = card
 
                             if is_new(job_id):
-                                found_new_this_page = True
                                 yield {
                                     "type": "progress",
                                     "message": f'Loading details: {card["title"]} at {card["company"]}…',
@@ -153,7 +151,7 @@ class LinkedInScraper:
                     await asyncio.sleep(2.5)
                     page += 1
 
-                    if not found_new_this_page and page > 3:
+                    if page >= self.PAGES_PER_QUERY:
                         break
                 await asyncio.sleep(1.0)
 
