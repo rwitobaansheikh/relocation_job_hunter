@@ -45,6 +45,7 @@ _buckets: dict[str, _TokenBucket] = {
     "llm": _TokenBucket(settings.llm_rate_per_min),
     "gemini": _TokenBucket(settings.gemini_rate_per_min),  # legacy alias
     "rocketreach": _TokenBucket(settings.rocketreach_rate_per_min),
+    "smtp_verify": _TokenBucket(settings.smtp_verify_rate_per_min),
 }
 
 

@@ -4,6 +4,7 @@ import ApplyOnSiteButton from '../components/ApplyOnSiteButton'
 import JobDescription from '../components/JobDescription'
 import HelpButton from '../components/HelpButton'
 import OnboardingGuide from '../components/OnboardingGuide'
+import OutreachPanel from '../components/OutreachPanel'
 import TailoredDocuments from '../components/TailoredDocuments'
 import { useProfile } from '../ProfileContext'
 
@@ -31,8 +32,13 @@ const FIRST_APP_STEPS = [
   },
   {
     step: 4,
-    title: 'Apply on the job site',
-    body: 'Open the listing, upload your tailored documents, and submit the application yourself.',
+    title: 'Apply or email outreach',
+    body: 'Apply on the job site, or find recruiter emails and send your tailored documents directly.',
+  },
+  {
+    step: 5,
+    title: 'Track status',
+    body: 'Mark applications as applied, rejected, or follow up as you hear back.',
   },
 ]
 
@@ -51,6 +57,7 @@ export default function Applications() {
   const [expandedAnalysis, setExpandedAnalysis] = useState(null)
   const [expandedDesc, setExpandedDesc] = useState(null)
   const [expandedDocs, setExpandedDocs] = useState(null)
+  const [expandedOutreach, setExpandedOutreach] = useState(null)
   const [viewMode, setViewMode] = useState('table')
 
   const parseAnalysis = (app) => {
@@ -169,6 +176,7 @@ export default function Applications() {
       if (expandedDocs === app.id) setExpandedDocs(null)
       if (expandedDesc === app.id) setExpandedDesc(null)
       if (expandedAnalysis === app.id) setExpandedAnalysis(null)
+      if (expandedOutreach === app.id) setExpandedOutreach(null)
       setActionMsg({ type: 'success', text: `Removed "${label}".` })
       await loadApps()
     } catch (err) {
@@ -224,18 +232,28 @@ export default function Applications() {
     setExpandedDocs((prev) => (prev === appId ? null : appId))
     setExpandedDesc(null)
     setExpandedAnalysis(null)
+    setExpandedOutreach(null)
+  }
+
+  const toggleOutreach = (appId) => {
+    setExpandedOutreach((prev) => (prev === appId ? null : appId))
+    setExpandedDesc(null)
+    setExpandedAnalysis(null)
+    setExpandedDocs(null)
   }
 
   const toggleDesc = (appId) => {
     setExpandedDesc((prev) => (prev === appId ? null : appId))
     setExpandedDocs(null)
     setExpandedAnalysis(null)
+    setExpandedOutreach(null)
   }
 
   const toggleAnalysis = (appId) => {
     setExpandedAnalysis((prev) => (prev === appId ? null : appId))
     setExpandedDocs(null)
     setExpandedDesc(null)
+    setExpandedOutreach(null)
   }
 
   const renderExpandedPanels = (app) => (
@@ -246,6 +264,12 @@ export default function Applications() {
         open={expandedDocs === app.id}
         onClose={() => setExpandedDocs(null)}
         onApply={() => handleManualApply(app)}
+      />
+      <OutreachPanel
+        applicationId={app.id}
+        companyDomain={app.job?.company_domain}
+        open={expandedOutreach === app.id}
+        onSent={loadApps}
       />
       {expandedDesc === app.id && (
         <div className="application-card__panel">
@@ -302,7 +326,7 @@ export default function Applications() {
         </div>
       </div>
       <p className="page-subtitle">
-        Search jobs in one place, tailor your CV and cover letter per role, then apply manually on each job site.
+        Tailor CVs and cover letters per role, apply on job sites, or find recruiter emails and send outreach.
       </p>
 
       {showOnboarding && (
@@ -375,9 +399,14 @@ export default function Applications() {
                       </button>
                     )}
                     {hasTailoredDocs(app) && (
-                      <button type="button" className="btn-secondary btn-sm" onClick={() => toggleDocs(app.id)}>
-                        Docs
-                      </button>
+                      <>
+                        <button type="button" className="btn-secondary btn-sm" onClick={() => toggleDocs(app.id)}>
+                          Docs
+                        </button>
+                        <button type="button" className="btn-secondary btn-sm" onClick={() => toggleOutreach(app.id)}>
+                          Outreach
+                        </button>
+                      </>
                     )}
                     <ApplyOnSiteButton
                       jobUrl={app.job?.url}
@@ -433,6 +462,9 @@ export default function Applications() {
                   <button type="button" className="btn-secondary btn-sm" onClick={() => toggleDocs(app.id)}>
                     {expandedDocs === app.id ? 'Hide documents' : 'Preview & download'}
                   </button>
+                  <button type="button" className="btn-secondary btn-sm" onClick={() => toggleOutreach(app.id)}>
+                    {expandedOutreach === app.id ? 'Hide outreach' : 'Email outreach'}
+                  </button>
                 </div>
               )}
 
@@ -449,21 +481,31 @@ export default function Applications() {
                   </HelpButton>
                 )}
                 {hasTailoredDocs(app) && (
-                  <HelpButton
-                    className="btn-secondary"
-                    onClick={() => toggleDocs(app.id)}
-                    title="Preview documents"
-                    help="Review, edit, and download your tailored Word documents."
-                  >
-                    2. Preview & download
-                  </HelpButton>
+                  <>
+                    <HelpButton
+                      className="btn-secondary"
+                      onClick={() => toggleDocs(app.id)}
+                      title="Preview documents"
+                      help="Review, edit, and download your tailored Word documents."
+                    >
+                      2. Preview & download
+                    </HelpButton>
+                    <HelpButton
+                      className="btn-secondary"
+                      onClick={() => toggleOutreach(app.id)}
+                      title="Email outreach"
+                      help="Find recruiter emails via SMTP verification and send your tailored documents."
+                    >
+                      3. Email outreach
+                    </HelpButton>
+                  </>
                 )}
                 <ApplyOnSiteButton
                   jobUrl={app.job?.url}
                   onApply={() => handleManualApply(app, hasTailoredDocs(app))}
                   busy={busy === `apply-${app.id}`}
                   className="btn-primary"
-                  label={hasTailoredDocs(app) ? '3. Apply on job site' : 'View job listing'}
+                  label={hasTailoredDocs(app) ? '4. Apply on job site' : 'View job listing'}
                 />
               </div>
 

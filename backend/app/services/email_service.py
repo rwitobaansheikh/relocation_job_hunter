@@ -17,6 +17,7 @@ from app.database import ApplicationStatus, JobApplication, OutreachEmail, UserP
 from app.security import decrypt_secret
 from app.services.email_finder import Contact, EmailFinder
 from app.services.llm import llm_generate
+from app.services.system_email import send_system_email
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +169,8 @@ class EmailService:
         background: str,
         smtp: dict | None = None,
     ) -> OutreachEmail:
-        smtp = smtp or self._smtp_config(profile)
+        """Send a preview to the user from the app mailbox, not their SMTP."""
+        del smtp  # outreach tests always use the system sender
         self_address = self._registered_email(profile)
         if not self_address:
             raise ValueError(
@@ -180,8 +182,11 @@ class EmailService:
         real_subject, real_body = await self._generate_email(profile, job, primary, background)
         subject = f"[TEST] {real_subject}"
         body = (
-            "*** THIS IS A TEST EMAIL SENT TO YOURSELF ***\n"
-            f"In a real send, this outreach would go to: {intended}\n"
+            "*** THIS IS A TEST PREVIEW FROM JOB APPLICATION FLOW ***\n"
+            f"This message was sent from {settings.system_email_from} to your inbox.\n"
+            f"In a real outreach send, recruiters would receive mail from your login email "
+            f"({self_address}) with the same attachments.\n\n"
+            f"Intended recipients: {intended}\n"
             f"Company: {job.company}\n"
             f"Subject would be: {real_subject}\n"
             "----------------------------------------------------------\n\n"
@@ -190,30 +195,33 @@ class EmailService:
 
         outreach = OutreachEmail(
             application_id=application.id,
-            recipient_name="Me (test send)",
+            recipient_name="Me (test preview)",
             recipient_email=self_address,
-            recipient_title="SMTP test",
+            recipient_title="Outreach preview",
             subject=subject,
             body=body,
             status="pending",
         )
         try:
-            await self._send_email(
-                to=self_address,
-                subject=subject,
-                body=body,
+            sent = await send_system_email(
+                self_address,
+                subject,
+                body,
                 attachments=[
                     application.tailored_cv_path,
                     application.tailored_cover_letter_path,
                 ],
-                smtp=smtp,
             )
+            if not sent:
+                raise ValueError(
+                    "App mail is not configured. Contact support if test emails fail to arrive."
+                )
             outreach.status = "test_sent"
             outreach.sent_at = datetime.utcnow()
         except Exception as exc:
             outreach.status = "failed"
             outreach.error_message = str(exc)
-            logger.error("Test send to %s failed: %s", self_address, exc)
+            logger.error("Test preview to %s failed: %s", self_address, exc)
 
         db.add(outreach)
         db.commit()
@@ -372,47 +380,38 @@ Best regards,
 
     @staticmethod
     def _smtp_config(profile) -> dict:
-        """Resolve the sending identity from the user's own SMTP credentials."""
+        """User SMTP for recruiter outreach — always sends from the login email."""
         account_email = EmailService._account_email(profile)
         sender_name = EmailService._sender_name(profile)
-        from_header = account_email
-        if sender_name and account_email:
-            from_header = f"{sender_name} <{account_email}>"
+        if not account_email:
+            raise ValueError("No login email found on your account.")
 
         password = decrypt_secret(getattr(profile, "smtp_password_enc", "") or "")
-        smtp_user = (getattr(profile, "smtp_user", "") or "").strip()
+        smtp_user = (getattr(profile, "smtp_user", "") or account_email).strip()
 
-        if not smtp_user or not password:
+        if not password:
             raise ValueError(
-                "Configure your sending email in Settings: add your email address "
-                "and Gmail app password so messages are sent from your inbox."
+                "Configure your mailbox in Settings: add your Gmail app password so "
+                "outreach to recruiters is sent from your login email."
             )
 
-        if account_email and smtp_user.lower() != account_email.lower():
+        if smtp_user.lower() != account_email.lower():
             raise ValueError(
-                f"SMTP username ({smtp_user}) must match your account email "
-                f"({account_email}). Update Settings → Sending identity."
+                f"SMTP username must match your login email ({account_email}). "
+                "Update Settings → Outreach mailbox."
             )
+
+        from_header = account_email
+        if sender_name:
+            from_header = f"{sender_name} <{account_email}>"
 
         return {
             "host": profile.smtp_host or settings.smtp_host,
             "port": profile.smtp_port or settings.smtp_port,
-            "user": smtp_user,
+            "user": account_email,
             "password": password,
-            "from": (getattr(profile, "smtp_from", "") or "").strip() or from_header or smtp_user,
+            "from": from_header,
         }
-
-    async def send_system_email(self, to: str, subject: str, body: str) -> None:
-        """Send a plain notification from the shared app mailbox (used for
-        contact-us messages). Raises ValueError if no shared SMTP is set."""
-        smtp = {
-            "host": settings.smtp_host,
-            "port": settings.smtp_port,
-            "user": settings.smtp_user,
-            "password": settings.smtp_password,
-            "from": settings.smtp_from or settings.smtp_user,
-        }
-        await self._send_email(to, subject, body, [], smtp)
 
     async def _send_email(
         self,

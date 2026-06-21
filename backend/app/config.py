@@ -24,9 +24,18 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_from: str = ""
+    # App → user mail (trial reminders, test previews, billing notices).
+    system_email_from: str = "email@jobapplicationflow.com"
+    system_email_name: str = "Job Application Flow"
     database_url: str = "sqlite:///./job_hunter.db"
     max_jobs_per_search: int = 100
     max_emails_per_company: int = 5
+    # SMTP RCPT TO verification for finding company/recruiter emails (see email_finder_lib/).
+    smtp_verify_enabled: bool = True
+    smtp_verify_helo_domain: str = "jobapplicationflow.com"
+    smtp_verify_mail_from: str = "verify@jobapplicationflow.com"
+    smtp_verify_delay_ms: int = 1500
+    smtp_verify_timeout_ms: int = 10000
     job_age_hours: int = 48
     uploads_dir: str = "uploads"
     generated_dir: str = "generated"
@@ -50,6 +59,7 @@ class Settings(BaseSettings):
     llm_rate_per_min: int = 60
     gemini_rate_per_min: int = 12
     rocketreach_rate_per_min: int = 10
+    smtp_verify_rate_per_min: int = 8
     # Safety ceiling for daily outbound emails per user (overridable per profile).
     default_daily_send_cap: int = 20
     default_per_domain_cap: int = 2

@@ -81,7 +81,7 @@ function PasswordSection() {
 }
 
 export default function Settings() {
-  const { logout } = useAuth()
+  const { user, logout } = useAuth()
   const [settings, setSettings] = useState(null)
   const [form, setForm] = useState({})
   const [message, setMessage] = useState(null)
@@ -96,22 +96,11 @@ export default function Settings() {
   useEffect(() => {
     api
       .getSettings()
-      .then(async (s) => {
+      .then((s) => {
         setSettings(s)
-        let defaultUser = s.smtp_user || ''
-        if (!defaultUser) {
-          try {
-            const profile = await api.getProfile()
-            defaultUser = profile.email || ''
-          } catch {
-            defaultUser = ''
-          }
-        }
         setForm({
           smtp_host: s.smtp_host || '',
           smtp_port: s.smtp_port || 587,
-          smtp_user: defaultUser,
-          smtp_from: s.smtp_from || defaultUser,
           smtp_password: '',
           gemini_api_key: '',
           rocketreach_api_key: '',
@@ -164,12 +153,19 @@ export default function Settings() {
       {message && <div className={`alert alert-${message.type}`}>{message.text}</div>}
 
       <div className="card">
-        <h3 style={{ marginBottom: '1rem' }}>Sending identity (SMTP) <span className="badge badge-discovered">Coming soon</span></h3>
+        <h3 style={{ marginBottom: '1rem' }}>Outreach mailbox (your login email)</h3>
         <p className="muted" style={{ marginBottom: '1rem' }}>
-          Email outreach is not available yet — we&apos;re building a better contact-finding flow.
-          SMTP settings will be used when outreach launches. For now, apply manually on each job site from Applications.
+          Emails to recruiters are sent from <strong>{user?.email || 'your login email'}</strong>.
+          Add your mailbox app password below (Gmail users: create an App Password).
         </p>
-        <fieldset disabled style={{ opacity: 0.65, border: 'none', padding: 0, margin: 0 }}>
+        <p className="muted" style={{ marginBottom: '1rem', fontSize: '0.85rem' }}>
+          Trial reminders, test previews, and billing notices come from{' '}
+          <strong>email@jobapplicationflow.com</strong> — not from this mailbox.
+        </p>
+        <div className="form-group">
+          <label>Send outreach as</label>
+          <input value={user?.email || ''} readOnly disabled />
+        </div>
         <div className="form-group">
           <label>SMTP Host</label>
           <input value={form.smtp_host} onChange={(e) => set('smtp_host', e.target.value)} placeholder="smtp.gmail.com" />
@@ -177,14 +173,6 @@ export default function Settings() {
         <div className="form-group">
           <label>SMTP Port</label>
           <input type="number" value={form.smtp_port} onChange={(e) => set('smtp_port', Number(e.target.value))} />
-        </div>
-        <div className="form-group">
-          <label>SMTP Username</label>
-          <input value={form.smtp_user} onChange={(e) => set('smtp_user', e.target.value)} placeholder="you@gmail.com" />
-        </div>
-        <div className="form-group">
-          <label>From Address (optional)</label>
-          <input value={form.smtp_from} onChange={(e) => set('smtp_from', e.target.value)} placeholder="defaults to username" />
         </div>
         <div className="form-group">
           <label>SMTP Password {settings.smtp_password_set && <span className="muted">(set - leave blank to keep)</span>}</label>
@@ -195,7 +183,6 @@ export default function Settings() {
             placeholder={settings.smtp_password_set ? '••••••••' : 'app password'}
           />
         </div>
-        </fieldset>
       </div>
 
       <div className="card" style={{ marginTop: '1.5rem' }}>

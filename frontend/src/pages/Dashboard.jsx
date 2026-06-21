@@ -23,7 +23,7 @@ const DASHBOARD_STEPS = [
   {
     step: 3,
     title: 'Tailor & apply',
-    body: 'Tailor documents for a role, review your CV and cover letter, then apply on the job site.',
+    body: 'Tailor documents for a role, find recruiter emails, send outreach, or apply on the job site.',
     to: '/app/applications',
     linkLabel: 'Go to Applications →',
   },
@@ -103,7 +103,7 @@ export default function Dashboard() {
               style={{ width: '100%' }}
               onClick={() => navigate('/app/applications')}
               title="View Applications"
-              help="See every job you've saved, tailor documents, preview and download them, and apply on each job site."
+              help="See every job you've saved, tailor documents, find contacts, send outreach, or apply on each job site."
             >
               View Applications
             </HelpButton>

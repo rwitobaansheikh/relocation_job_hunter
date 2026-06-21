@@ -72,6 +72,7 @@ from app.services.cv_link_extractor import build_project_link_map, serialize_pro
 from app.services.document_parser import extract_text_from_file
 from app.services.email_finder import EmailFinder
 from app.services.email_service import EmailService
+from app.services.system_email import send_system_email
 from app.services.job_matcher import JobMatcher
 from app.services.job_search import JobSearchService, SearchFilters
 from app.services.plans import effective_limits
@@ -242,7 +243,7 @@ async def submit_contact(data: ContactCreate, db: Session = Depends(get_db)):
             f"Subject: {data.subject.strip() or '(none)'}\n\n"
             f"{data.message.strip()}\n"
         )
-        await EmailService().send_system_email(settings.contact_email, subject, body)
+        await send_system_email(settings.contact_email, subject, body)
         emailed = True
     except Exception as exc:  # pragma: no cover - depends on SMTP config
         logger.warning("Contact email could not be delivered: %s", exc)
@@ -374,17 +375,20 @@ def get_settings(profile: UserProfile = Depends(get_current_profile)):
 @router.patch("/settings", response_model=SettingsResponse)
 def update_settings(
     data: SettingsUpdate,
+    user: User = Depends(get_current_user),
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
     payload = data.model_dump(exclude_unset=True)
+    login_email = (user.email or profile.email or "").strip()
+    if login_email:
+        profile.smtp_user = login_email
+        profile.smtp_from = login_email
+    payload.pop("smtp_user", None)
+    payload.pop("smtp_from", None)
     # Secrets: empty string clears, non-empty encrypts, omitted leaves as-is.
     if "smtp_password" in payload:
         profile.smtp_password_enc = encrypt_secret(payload.pop("smtp_password") or "")
-        if not (payload.get("smtp_user") or profile.smtp_user):
-            profile.smtp_user = profile.email or ""
-        if not (payload.get("smtp_from") or profile.smtp_from):
-            profile.smtp_from = profile.email or ""
     if "gemini_api_key" in payload:
         profile.gemini_api_key_enc = encrypt_secret(payload.pop("gemini_api_key") or "")
     if "rocketreach_api_key" in payload:
@@ -909,7 +913,7 @@ async def find_application_contacts(
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
-    """Look up outreach contacts (emails) for the job's company via Hunter.io."""
+    """Look up outreach contacts for the job's company via OSINT + SMTP verification."""
     app = _owned_application(db, application_id, profile, with_job=True)
     if not app.job:
         raise HTTPException(status_code=400, detail="Application has no associated job")
@@ -922,7 +926,15 @@ async def find_application_contacts(
         limit=settings.max_emails_per_company,
     )
     return [
-        ContactResponse(name=c.name, email=c.email, title=c.title, confidence=c.confidence)
+        ContactResponse(
+            name=c.name,
+            email=c.email,
+            title=c.title,
+            confidence=c.confidence,
+            pattern=c.pattern,
+            verification_status=c.verification_status,
+            catch_all=c.catch_all,
+        )
         for c in contacts
     ]
 

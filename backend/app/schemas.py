@@ -431,6 +431,9 @@ class ContactResponse(BaseModel):
     email: str
     title: str
     confidence: int = 0
+    pattern: str = ""
+    verification_status: str = ""
+    catch_all: bool = False
 
 
 class OutreachEmailResponse(BaseModel):
