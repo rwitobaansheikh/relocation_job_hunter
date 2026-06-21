@@ -31,7 +31,7 @@ MAX_LOOPS_HARD_CAP = 5
 PAID_PLANS = ("basic", "standard", "pro")
 
 PLAN_LIMITS: dict[str, Limits] = {
-    # 7-day free trial mirrors Basic.
+    # 3-day free trial mirrors Basic.
     "trial": Limits("trial", max_loops=1, auto_per_loop_per_day=5, manual_per_day=20, tailor_per_day=10, llm_per_day=50),
     "basic": Limits("basic", max_loops=1, auto_per_loop_per_day=5, manual_per_day=20, tailor_per_day=10, llm_per_day=50),
     "standard": Limits("standard", max_loops=3, auto_per_loop_per_day=20, manual_per_day=100, tailor_per_day=50, llm_per_day=250),

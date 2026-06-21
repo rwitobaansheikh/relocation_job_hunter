@@ -45,7 +45,8 @@ if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]]; then
   warn+=("Remove CLOUDFLARE_TUNNEL_TOKEN from dev — use tunnel route to :8080 instead")
 fi
 
-warn_if GOOGLE_CLIENT_ID "Google OAuth (social login)"
+warn_if STRIPE_WEBHOOK_SECRET "Stripe webhook (run scripts/stripe-setup-webhooks.sh test)"
+warn_if STRIPE_SECRET_KEY "Stripe test secret key"
 warn_if GOOGLE_CLIENT_SECRET "Google OAuth secret"
 warn_if LINKEDIN_CLIENT_ID "LinkedIn OAuth (social login)"
 warn_if LINKEDIN_CLIENT_SECRET "LinkedIn OAuth secret"

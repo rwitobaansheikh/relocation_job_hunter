@@ -38,6 +38,18 @@ export default function Billing() {
     }
   }
 
+  const startTrial = async () => {
+    setBusy('trial')
+    setMessage(null)
+    try {
+      const { url } = await api.startTrialCheckout()
+      window.location.href = url
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message })
+      setBusy(null)
+    }
+  }
+
   const manage = async () => {
     setBusy('portal')
     setMessage(null)
@@ -55,13 +67,37 @@ export default function Billing() {
 
   const planLabel = data.plan === 'unlimited' ? 'Unlimited (admin)' : data.plan
   const hasSubscription = ['basic', 'standard', 'pro'].includes(data.plan)
+  const trialDays = data.trial_days || 3
+  const showTrialCta = data.stripe_configured && !data.has_stripe_subscription && data.plan !== 'unlimited'
 
   return (
     <div>
       <h2 className="page-title">Plan & Billing</h2>
-      <p className="page-subtitle">Choose a plan to unlock more automation loops and daily applications.</p>
+      <p className="page-subtitle">
+        Start with a {trialDays}-day free trial on Basic, then upgrade as your job search scales.
+      </p>
 
       {message && <div className={`alert alert-${message.type}`}>{message.text}</div>}
+
+      {showTrialCta && (
+        <div className="card trial-cta-card">
+          <div>
+            <h3 style={{ marginBottom: '0.35rem' }}>{trialDays}-day free trial</h3>
+            <p className="muted" style={{ margin: 0 }}>
+              Full Basic plan access for {trialDays} days. Add your card now — you will only be charged when the trial ends unless you cancel.
+            </p>
+          </div>
+          <HelpButton
+            className="btn-primary"
+            onClick={startTrial}
+            disabled={busy === 'trial'}
+            title="Start free trial"
+            help={`Unlock Basic plan features for ${trialDays} days. Stripe collects your payment method and charges automatically when the trial ends.`}
+          >
+            {busy === 'trial' ? 'Redirecting…' : `Start ${trialDays}-day free trial`}
+          </HelpButton>
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.6rem' }}>
@@ -70,6 +106,9 @@ export default function Billing() {
             <div style={{ fontSize: '1.3rem', fontWeight: 700, textTransform: 'capitalize' }}>{planLabel}</div>
             {data.plan === 'trial' && (
               <div className="muted">Free trial — {data.trial_days_left} day(s) left</div>
+            )}
+            {data.plan_status === 'trialing' && hasSubscription && (
+              <div className="muted">Stripe trial active — billing starts when trial ends</div>
             )}
             {data.plan === 'expired' && (
               <div className="muted">Your trial has ended. Subscribe to keep applying.</div>

@@ -138,6 +138,18 @@ export default function Dashboard() {
             <Link to="/app/automation" style={{ fontSize: '0.85rem' }}>Manage loops →</Link>
             <Link to="/app/billing" style={{ fontSize: '0.85rem' }}>Plan & Billing →</Link>
           </div>
+          {billing.stripe_configured && !billing.has_stripe_subscription && billing.plan !== 'unlimited' && (
+            <div style={{ marginBottom: '0.75rem' }}>
+              <HelpButton
+                className="btn-primary btn-sm"
+                onClick={() => navigate('/app/billing')}
+                title="Start free trial"
+                help="Add your card for a 3-day free trial on Basic. You are only charged when the trial ends."
+              >
+                Start 3-day free trial
+              </HelpButton>
+            </div>
+          )}
           <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
             {billing.usage.loops_active} / {billing.limits.max_loops} automation loops active ·
             {' '}{billing.usage.manual_today} / {billing.limits.manual_per_day} manual applications today

@@ -5,6 +5,10 @@ import { ContactSection, ReviewsSection } from '../components/Feedback'
 
 const FEATURES = [
   {
+    title: 'Bulk application pipeline',
+    body: 'Search hundreds of roles, tailor CVs in batch, preview documents, and send outreach to multiple jobs from one table view.',
+  },
+  {
     title: 'Smart job discovery',
     body: 'Scans LinkedIn, RemoteOK, Remotive, We Work Remotely and more for fresh roles that match your CV, target roles and locations.',
   },
@@ -14,15 +18,11 @@ const FEATURES = [
   },
   {
     title: 'AI-tailored CVs & cover letters',
-    body: 'Every application gets a one-page CV and cover letter rewritten for the job description and rendered as a polished, recruiter-ready PDF.',
+    body: 'Every application gets a one-page CV and cover letter rewritten for the job description — preview, edit, and download as ATS-friendly Word docs.',
   },
   {
     title: 'Verified contact finding',
-    body: 'Finds HR and hiring contacts at each company via RocketReach, prioritising real people over generic inboxes.',
-  },
-  {
-    title: 'Personalised outreach',
-    body: 'Generates compelling, genuinely personalised emails per contact — no placeholders, ever — and sends them from your own mailbox.',
+    body: 'Finds HR and hiring contacts at each company, prioritising real people over generic inboxes.',
   },
   {
     title: 'Hands-free automation',
@@ -56,13 +56,14 @@ export default function Landing() {
       </nav>
 
       <header className="landing-hero">
-        <h1>Search, tailor, and apply — on autopilot</h1>
+        <div className="landing-hero__badge">3-day free trial · Bulk apply ready</div>
+        <h1>Apply to more jobs in less time</h1>
         <p>
-          Job Application Flow finds roles that fit your background, tailors your CV and cover letter
-          to each one, finds the right people to email, and runs the whole application loop for you.
+          Job Application Flow is your AI copilot for bulk job search — discover roles, tailor CVs and cover letters
+          per job, preview everything before you send, and reach hiring teams at scale.
         </p>
         <div className="landing-cta">
-          <button className="btn-primary" onClick={() => navigate('/register')}>Create free account</button>
+          <button className="btn-primary" onClick={() => navigate('/register')}>Start free trial</button>
           <button className="btn-secondary" onClick={() => navigate('/login')}>I already have an account</button>
         </div>
       </header>

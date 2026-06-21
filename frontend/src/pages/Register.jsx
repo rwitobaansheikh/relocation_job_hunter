@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
 import { useTheme } from '../ThemeContext'
 import OAuthButtons from '../components/OAuthButtons'
+import { redirectToTrialCheckoutIfNeeded } from '../utils/trialCheckout'
 
 export default function Register() {
   const { user, register } = useAuth()
@@ -26,7 +27,8 @@ export default function Register() {
     setError(null)
     try {
       await register(form)
-      navigate('/app')
+      const redirected = await redirectToTrialCheckoutIfNeeded()
+      if (!redirected) navigate('/app')
     } catch (err) {
       setError(err.message)
     }
@@ -46,7 +48,9 @@ export default function Register() {
           </div>
         </div>
         <h2 style={{ fontSize: '1.5rem', textAlign: 'center' }}>Create your account</h2>
-        <p className="page-subtitle" style={{ textAlign: 'center', marginBottom: '1.5rem' }}>Start your automated job search</p>
+        <p className="page-subtitle" style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+          3-day free trial on Basic — tailor CVs, find jobs, and apply in bulk
+        </p>
         
         {error && <div className="alert alert-error">{error}</div>}
 

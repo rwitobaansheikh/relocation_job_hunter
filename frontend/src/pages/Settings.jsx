@@ -2,6 +2,84 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { useAuth } from '../AuthContext'
 
+function PasswordSection() {
+  const { user } = useAuth()
+  const [form, setForm] = useState({ current: '', next: '', confirm: '' })
+  const [message, setMessage] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const oauthAccount = Boolean(user?.oauth_provider)
+
+  const submit = async (e) => {
+    e.preventDefault()
+    if (form.next.length < 8) {
+      setMessage({ type: 'error', text: 'New password must be at least 8 characters' })
+      return
+    }
+    if (form.next !== form.confirm) {
+      setMessage({ type: 'error', text: 'Passwords do not match' })
+      return
+    }
+    setSaving(true)
+    setMessage(null)
+    try {
+      await api.changePassword({
+        current_password: form.current,
+        new_password: form.next,
+      })
+      setForm({ current: '', next: '', confirm: '' })
+      setMessage({ type: 'success', text: 'Password updated successfully' })
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message })
+    }
+    setSaving(false)
+  }
+
+  return (
+    <form onSubmit={submit}>
+      {message && <div className={`alert alert-${message.type}`}>{message.text}</div>}
+      {oauthAccount && (
+        <p className="muted" style={{ marginBottom: '1rem' }}>
+          You signed in with {user.oauth_provider}. Set a password here to also log in with email and password.
+        </p>
+      )}
+      {!oauthAccount && (
+        <div className="form-group">
+          <label>Current password</label>
+          <input
+            type="password"
+            value={form.current}
+            onChange={(e) => setForm((f) => ({ ...f, current: e.target.value }))}
+            required
+          />
+        </div>
+      )}
+      <div className="form-group">
+        <label>New password</label>
+        <input
+          type="password"
+          value={form.next}
+          onChange={(e) => setForm((f) => ({ ...f, next: e.target.value }))}
+          required
+          minLength={8}
+        />
+      </div>
+      <div className="form-group">
+        <label>Confirm new password</label>
+        <input
+          type="password"
+          value={form.confirm}
+          onChange={(e) => setForm((f) => ({ ...f, confirm: e.target.value }))}
+          required
+          minLength={8}
+        />
+      </div>
+      <button type="submit" className="btn-primary" disabled={saving}>
+        {saving ? 'Updating…' : oauthAccount ? 'Set password' : 'Change password'}
+      </button>
+    </form>
+  )
+}
+
 export default function Settings() {
   const { logout } = useAuth()
   const [settings, setSettings] = useState(null)
@@ -143,6 +221,11 @@ export default function Settings() {
         <button className="btn-primary" onClick={save} disabled={saving}>
           {saving ? 'Saving...' : 'Save settings'}
         </button>
+      </div>
+
+      <div className="card" style={{ marginTop: '1.5rem' }}>
+        <h3 style={{ marginBottom: '1rem' }}>Account password</h3>
+        <PasswordSection />
       </div>
 
       <div className="card danger-zone" style={{ marginTop: '2rem' }}>

@@ -68,22 +68,36 @@ def _ensure_customer(db: Session, user: User) -> str:
     return customer["id"]
 
 
-def create_checkout_session(db: Session, user: User, tier: str) -> str:
+def create_checkout_session(
+    db: Session, user: User, tier: str, *, with_trial: bool = False
+) -> str:
     client = _client()
     price = price_for_tier(tier)
     customer_id = _ensure_customer(db, user)
     base = settings.app_base_url.rstrip("/")
+
+    subscription_data: dict = {"metadata": {"user_id": str(user.id), "tier": tier}}
+    if with_trial:
+        subscription_data["trial_period_days"] = settings.trial_days
+
     session = client.checkout.Session.create(
         mode="subscription",
         customer=customer_id,
         line_items=[{"price": price, "quantity": 1}],
         allow_promotion_codes=True,
+        payment_method_collection="always",
         success_url=f"{base}/app/billing?status=success",
         cancel_url=f"{base}/app/billing?status=cancel",
-        metadata={"user_id": str(user.id), "tier": tier},
-        subscription_data={"metadata": {"user_id": str(user.id), "tier": tier}},
+        metadata={"user_id": str(user.id), "tier": tier, "trial": str(with_trial).lower()},
+        subscription_data=subscription_data,
     )
     return session["url"]
+
+
+def create_trial_checkout_session(db: Session, user: User) -> str:
+    """Start a Stripe subscription with a free trial; card is charged when trial ends."""
+    tier = settings.trial_default_tier or "basic"
+    return create_checkout_session(db, user, tier, with_trial=True)
 
 
 def cancel_subscription(user: User) -> bool:
@@ -202,6 +216,33 @@ def handle_webhook(db: Session, payload: bytes, sig_header: str) -> str:
         user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
         if user:
             user.plan_status = "past_due"
+            db.commit()
+    elif etype == "invoice.payment_succeeded":
+        customer_id = obj.get("customer")
+        sub_id = obj.get("subscription")
+        if sub_id:
+            sub = client.Subscription.retrieve(sub_id)
+            _apply_subscription(db, sub)
+        elif customer_id:
+            user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
+            if user:
+                sync_user_subscription(db, user)
+    elif etype == "customer.subscription.trial_will_end":
+        _apply_subscription(db, obj)
+        customer_id = obj.get("customer")
+        user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
+        if user and not user.trial_reminder_sent:
+            from app.services.trial_notifications import send_trial_ending_email
+            from app.services.system_email import send_system_email
+            import asyncio
+
+            to, subject, text, html = send_trial_ending_email(user)
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(send_system_email(to, subject, text, html))
+            except RuntimeError:
+                asyncio.run(send_system_email(to, subject, text, html))
+            user.trial_reminder_sent = True
             db.commit()
 
     return etype

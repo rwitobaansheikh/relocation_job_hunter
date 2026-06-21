@@ -41,7 +41,7 @@ def _ensure_user_profile(db: Session, user: User, email: str, name: str) -> None
     db.commit()
 
 
-def _get_or_create_oauth_user(db: Session, email: str, name: str) -> User:
+def _get_or_create_oauth_user(db: Session, email: str, name: str, provider: str = "") -> User:
     user = db.query(User).filter(User.email == email).first()
     if user:
         if not user.is_active:
@@ -59,6 +59,7 @@ def _get_or_create_oauth_user(db: Session, email: str, name: str) -> User:
         plan="trial",
         plan_status="trialing",
         trial_end=datetime.utcnow() + timedelta(days=settings.trial_days),
+        oauth_provider=provider,
     )
     db.add(user)
     db.commit()
@@ -79,9 +80,9 @@ def _get_or_create_oauth_user(db: Session, email: str, name: str) -> User:
     return user
 
 
-def _oauth_user_or_redirect(db: Session, email: str, name: str):
+def _oauth_user_or_redirect(db: Session, email: str, name: str, provider: str = ""):
     try:
-        return _get_or_create_oauth_user(db, email, name)
+        return _get_or_create_oauth_user(db, email, name, provider)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else "Authentication failed"
         return oauth_error_redirect(detail)
@@ -167,7 +168,7 @@ async def google_oauth_callback(
         if not email:
             return oauth_error_redirect("Google account has no email address")
 
-        user = _oauth_user_or_redirect(db, email, name)
+        user = _oauth_user_or_redirect(db, email, name, "google")
         if not isinstance(user, User):
             return user
 
@@ -253,7 +254,7 @@ async def linkedin_oauth_callback(
         if not email:
             return oauth_error_redirect("LinkedIn account has no email address")
 
-        user = _oauth_user_or_redirect(db, email, name)
+        user = _oauth_user_or_redirect(db, email, name, "linkedin")
         if not isinstance(user, User):
             return user
 

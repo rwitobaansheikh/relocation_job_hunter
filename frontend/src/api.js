@@ -26,6 +26,11 @@ async function request(path, options = {}) {
     // Let the auth layer react (clear user, redirect to login).
     window.dispatchEvent(new Event('auth:unauthorized'))
   }
+  if (res.status === 402) {
+    const err = await res.json().catch(() => ({ detail: 'Plan upgrade required' }))
+    window.dispatchEvent(new CustomEvent('plan:upgrade_required', { detail: { message: err.detail } }))
+    throw new Error(err.detail || 'Plan upgrade required')
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail || 'Request failed')
@@ -45,6 +50,7 @@ export const api = {
   register: (data) => request('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
   login: (data) => request('/auth/login', { method: 'POST', body: JSON.stringify(data) }),
   me: () => request('/auth/me'),
+  changePassword: (data) => request('/auth/change-password', { method: 'POST', body: JSON.stringify(data) }),
   getGoogleAuthUrl: () => request('/auth/google/url'),
   getLinkedinAuthUrl: () => request('/auth/linkedin/url'),
   getOAuthStatus: () => request('/auth/oauth/status'),
@@ -127,6 +133,11 @@ export const api = {
     return request(`/applications${qs ? `?${qs}` : ''}`)
   },
   getTailoredDocuments: (applicationId) => request(`/applications/${applicationId}/documents`),
+  updateCoverLetter: (applicationId, text) =>
+    request(`/applications/${applicationId}/cover-letter`, {
+      method: 'PATCH',
+      body: JSON.stringify({ text }),
+    }),
   fetchTailoredDocument: async (applicationId, docType) => {
     const headers = {}
     if (authToken) headers['Authorization'] = `Bearer ${authToken}`
@@ -146,6 +157,11 @@ export const api = {
     request('/applications/send-outreach', {
       method: 'POST',
       body: JSON.stringify({ application_id: applicationId, dry_run: dryRun, test_to_self: testToSelf }),
+    }),
+  sendOutreachBatch: (applicationIds, dryRun = false) =>
+    request('/applications/send-outreach-batch', {
+      method: 'POST',
+      body: JSON.stringify({ application_ids: applicationIds, dry_run: dryRun }),
     }),
   scheduleFollowUp: (applicationId, notes, scheduleNextDays = 7) =>
     request('/applications/follow-up', {
@@ -169,6 +185,7 @@ export const api = {
   // --- Billing ---
   getBilling: () => request('/billing'),
   checkout: (tier) => request('/billing/checkout', { method: 'POST', body: JSON.stringify({ tier }) }),
+  startTrialCheckout: () => request('/billing/trial-checkout', { method: 'POST' }),
   openPortal: () => request('/billing/portal', { method: 'POST' }),
 
   // --- Feedback / reviews / contact (public) ---

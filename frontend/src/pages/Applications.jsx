@@ -55,6 +55,8 @@ export default function Applications() {
   const [expandedAnalysis, setExpandedAnalysis] = useState(null)
   const [expandedDesc, setExpandedDesc] = useState(null)
   const [expandedDocs, setExpandedDocs] = useState(null)
+  const [selected, setSelected] = useState(new Set())
+  const [viewMode, setViewMode] = useState('table')
 
   const parseAnalysis = (app) => {
     try {
@@ -136,6 +138,47 @@ export default function Applications() {
   const handleStatusChange = async (appId, status) => {
     await api.updateStatus(appId, status)
     await loadApps()
+  }
+
+  const handleBulkSend = async () => {
+    const ids = applications.filter((a) => selected.has(a.id) && a.status === 'tailored').map((a) => a.id)
+    if (ids.length === 0) {
+      setActionMsg({ type: 'info', text: 'Select tailored applications to send outreach.' })
+      return
+    }
+    if (!window.confirm(`Send outreach for ${ids.length} application(s)?`)) return
+    setBusy('bulk-send')
+    setActionMsg(null)
+    try {
+      const res = await api.sendOutreachBatch(ids)
+      setActionMsg({
+        type: res.failed ? 'info' : 'success',
+        text: `Sent ${res.sent} application(s)${res.failed ? `, ${res.failed} failed` : ''}.`,
+      })
+      setSelected(new Set())
+      await loadApps()
+    } catch (err) {
+      setActionMsg({ type: 'error', text: err.message })
+    }
+    setBusy(null)
+  }
+
+  const toggleSelect = (appId) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(appId)) next.delete(appId)
+      else next.add(appId)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    const tailored = applications.filter((a) => a.status === 'tailored')
+    if (selected.size === tailored.length && tailored.length > 0) {
+      setSelected(new Set())
+    } else {
+      setSelected(new Set(tailored.map((a) => a.id)))
+    }
   }
 
   const handleClearAll = async () => {
@@ -254,7 +297,9 @@ export default function Applications() {
           </HelpButton>
         </div>
       </div>
-      <p className="page-subtitle">Tailor documents, review them, then send outreach — one job at a time.</p>
+      <p className="page-subtitle">
+        Bulk-apply workflow: tailor documents in batch, review CV & cover letter previews, then send outreach to multiple jobs.
+      </p>
 
       {showOnboarding && (
         <OnboardingGuide
@@ -266,12 +311,39 @@ export default function Applications() {
 
       {actionMsg && <div className={`alert alert-${actionMsg.type}`}>{actionMsg.text}</div>}
 
-      <div className="applications-toolbar">
+      <div className="applications-toolbar applications-toolbar--enhanced">
         <select value={filter} onChange={(e) => setFilter(e.target.value)} className="status-filter">
           {STATUS_OPTIONS.map((s) => (
             <option key={s} value={s}>{s ? s.replace('_', ' ') : 'All statuses'}</option>
           ))}
         </select>
+        <div className="view-toggle">
+          <button
+            type="button"
+            className={`btn-secondary btn-sm${viewMode === 'table' ? ' active' : ''}`}
+            onClick={() => setViewMode('table')}
+          >
+            Table
+          </button>
+          <button
+            type="button"
+            className={`btn-secondary btn-sm${viewMode === 'cards' ? ' active' : ''}`}
+            onClick={() => setViewMode('cards')}
+          >
+            Cards
+          </button>
+        </div>
+        {selected.size > 0 && (
+          <HelpButton
+            className="btn-primary btn-sm"
+            disabled={busy === 'bulk-send'}
+            onClick={handleBulkSend}
+            title="Send selected"
+            help="Send outreach emails for all selected tailored applications."
+          >
+            {busy === 'bulk-send' ? 'Sending…' : `Send ${selected.size} selected`}
+          </HelpButton>
+        )}
       </div>
 
       {loading ? (
@@ -280,6 +352,78 @@ export default function Applications() {
         <div className="empty-state">
           <p>No applications yet.</p>
           <p className="muted">Search for jobs and they will appear here automatically.</p>
+        </div>
+      ) : viewMode === 'table' ? (
+        <div className="applications-table-wrap card">
+          <table className="applications-table">
+            <thead>
+              <tr>
+                <th>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all tailored"
+                    checked={
+                      applications.filter((a) => a.status === 'tailored').length > 0
+                      && selected.size === applications.filter((a) => a.status === 'tailored').length
+                    }
+                    onChange={toggleSelectAll}
+                  />
+                </th>
+                <th>Role</th>
+                <th>Company</th>
+                <th>Match</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {applications.map((app) => (
+                <tr key={app.id} className={selected.has(app.id) ? 'applications-table__row--selected' : ''}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(app.id)}
+                      disabled={app.status !== 'tailored'}
+                      onChange={() => toggleSelect(app.id)}
+                      aria-label={`Select ${app.job?.title}`}
+                    />
+                  </td>
+                  <td>
+                    <strong>{app.job?.title || 'Unknown'}</strong>
+                    {app.job?.location && <div className="muted">{app.job.location}</div>}
+                  </td>
+                  <td>{app.job?.company}</td>
+                  <td>{app.ai_match_score > 0 ? `${app.ai_match_score}/100` : '—'}</td>
+                  <td><span className={`badge badge-${app.status}`}>{app.status.replace('_', ' ')}</span></td>
+                  <td className="applications-table__actions">
+                    {app.status === 'discovered' && (
+                      <button type="button" className="btn-primary btn-sm" disabled={busy === app.id} onClick={() => handleAction('tailor', app.id)}>
+                        Tailor
+                      </button>
+                    )}
+                    {hasTailoredDocs(app) && (
+                      <button type="button" className="btn-secondary btn-sm" onClick={() => toggleDocs(app.id)}>
+                        Preview
+                      </button>
+                    )}
+                    {app.status === 'tailored' && (
+                      <button type="button" className="btn-primary btn-sm" disabled={busy === app.id} onClick={() => handleAction('send', app.id)}>
+                        Send
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {applications.map((app) => (
+            <TailoredDocuments
+              key={`docs-${app.id}`}
+              applicationId={app.id}
+              open={expandedDocs === app.id}
+              onClose={() => setExpandedDocs(null)}
+            />
+          ))}
         </div>
       ) : (
         <div className="application-list">

@@ -55,6 +55,11 @@ class User(Base):
     current_period_end = Column(DateTime, nullable=True)
     # Admin-granted unrestricted access (dev/QA superusers).
     unlimited_access = Column(Boolean, default=False)
+    # OAuth sign-in provider (google|linkedin); empty for email/password accounts.
+    oauth_provider = Column(String(20), default="")
+    # Trial lifecycle emails (avoid duplicate sends).
+    trial_reminder_sent = Column(Boolean, default=False)
+    trial_expired_email_sent = Column(Boolean, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -279,6 +284,9 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "stripe_subscription_id": "VARCHAR(100) DEFAULT ''",
         "current_period_end": "DATETIME",
         "unlimited_access": "BOOLEAN DEFAULT 0",
+        "oauth_provider": "VARCHAR(20) DEFAULT ''",
+        "trial_reminder_sent": "BOOLEAN DEFAULT 0",
+        "trial_expired_email_sent": "BOOLEAN DEFAULT 0",
     },
     "automation_runs": {
         "automation_loop_id": "INTEGER",

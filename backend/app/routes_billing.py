@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
+from app.config import settings
 from app.database import AutomationLoop, User, UserProfile, get_db
 from app.schemas import (
     BillingLimits,
@@ -82,10 +83,12 @@ def get_billing(
         plan_status=user.plan_status or "",
         trial_end=user.trial_end,
         trial_days_left=days_left,
+        trial_days=settings.trial_days,
         current_period_end=user.current_period_end,
         unlimited_access=bool(user.unlimited_access),
         is_admin=user.role == "admin",
         stripe_configured=billing.is_configured(),
+        has_stripe_subscription=bool(user.stripe_subscription_id),
         limits=BillingLimits(
             max_loops=limits.max_loops,
             auto_per_loop_per_day=limits.auto_per_loop_per_day,
@@ -101,6 +104,21 @@ def get_billing(
         ),
         tiers=_tiers_for_country(country),
     )
+
+
+@billing_router.post("/trial-checkout", response_model=CheckoutResponse)
+def trial_checkout(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Start a 3-day free trial on Basic; card is charged automatically when trial ends."""
+    if user.stripe_subscription_id and user.plan_status in ("active", "trialing"):
+        raise HTTPException(status_code=400, detail="You already have an active subscription")
+    try:
+        url = billing.create_trial_checkout_session(db, user)
+    except billing.BillingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return CheckoutResponse(url=url)
 
 
 @billing_router.post("/checkout", response_model=CheckoutResponse)

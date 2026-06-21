@@ -1,26 +1,33 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import CvPreview from './CvPreview'
 
 export default function TailoredDocuments({ applicationId, open, onClose }) {
   const [meta, setMeta] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [tab, setTab] = useState('cv')
+  const [editing, setEditing] = useState(false)
+  const [letterDraft, setLetterDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await api.getTailoredDocuments(applicationId)
+      setMeta(data)
+      setLetterDraft(data.cover_letter_text || '')
+    } catch (err) {
+      setError(err.message)
+    }
+    setLoading(false)
+  }
 
   useEffect(() => {
     if (!open || !applicationId) return undefined
-
-    const load = async () => {
-      setLoading(true)
-      setError(null)
-      setMeta(null)
-      try {
-        const data = await api.getTailoredDocuments(applicationId)
-        setMeta(data)
-      } catch (err) {
-        setError(err.message)
-      }
-      setLoading(false)
-    }
+    setTab('cv')
+    setEditing(false)
     load()
   }, [open, applicationId])
 
@@ -38,12 +45,30 @@ export default function TailoredDocuments({ applicationId, open, onClose }) {
     }
   }
 
+  const saveCoverLetter = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      await api.updateCoverLetter(applicationId, letterDraft)
+      setMeta((m) => (m ? { ...m, cover_letter_text: letterDraft } : m))
+      setEditing(false)
+    } catch (err) {
+      setError(err.message)
+    }
+    setSaving(false)
+  }
+
   if (!open) return null
 
   return (
     <div className="tailored-docs-panel">
       <div className="tailored-docs-panel__header">
-        <h4>Tailored CV & Cover Letter</h4>
+        <div>
+          <h4>Tailored application package</h4>
+          <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+            Review your AI-generated CV and cover letter before sending outreach.
+          </p>
+        </div>
         <button type="button" className="btn-secondary btn-sm" onClick={onClose}>
           Close
         </button>
@@ -54,9 +79,23 @@ export default function TailoredDocuments({ applicationId, open, onClose }) {
 
       {!loading && meta && (
         <>
-          <p className="muted" style={{ marginBottom: '0.75rem' }}>
-            Documents are generated as Word (.docx) files for ATS compatibility. Download to open in Microsoft Word.
-          </p>
+          <div className="doc-tabs">
+            <button
+              type="button"
+              className={`doc-tab${tab === 'cv' ? ' doc-tab--active' : ''}`}
+              onClick={() => setTab('cv')}
+            >
+              CV preview
+            </button>
+            <button
+              type="button"
+              className={`doc-tab${tab === 'letter' ? ' doc-tab--active' : ''}`}
+              onClick={() => setTab('letter')}
+            >
+              Cover letter
+            </button>
+          </div>
+
           <div className="tailored-docs-panel__actions">
             {meta.has_cv && (
               <button
@@ -78,15 +117,55 @@ export default function TailoredDocuments({ applicationId, open, onClose }) {
             )}
           </div>
 
-          {meta.cover_letter_text && (
-            <div className="tailored-docs-panel__letter">
-              <div className="tailored-docs-panel__label">Cover letter preview</div>
-              <div className="tailored-docs-panel__letter-body">{meta.cover_letter_text}</div>
+          {tab === 'cv' && (
+            <div className="tailored-docs-panel__preview">
+              {meta.cv_preview ? (
+                <CvPreview data={meta.cv_preview} />
+              ) : meta.has_cv ? (
+                <p className="muted">Download the CV to review — preview available for newly tailored applications.</p>
+              ) : (
+                <p className="muted">No tailored CV yet. Run &quot;Tailor documents&quot; first.</p>
+              )}
             </div>
           )}
 
-          {!meta.has_cv && !meta.has_cover_letter && (
-            <p className="muted">No tailored documents found. Run &quot;Tailor Docs&quot; first.</p>
+          {tab === 'letter' && (
+            <div className="tailored-docs-panel__letter">
+              <div className="tailored-docs-panel__label-row">
+                <div className="tailored-docs-panel__label">Cover letter preview</div>
+                {!editing && meta.cover_letter_text && (
+                  <button type="button" className="btn-secondary btn-sm" onClick={() => setEditing(true)}>
+                    Edit
+                  </button>
+                )}
+              </div>
+              {editing ? (
+                <>
+                  <textarea
+                    className="cover-letter-editor"
+                    value={letterDraft}
+                    onChange={(e) => setLetterDraft(e.target.value)}
+                    rows={12}
+                  />
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                    <button type="button" className="btn-primary btn-sm" disabled={saving} onClick={saveCoverLetter}>
+                      {saving ? 'Saving…' : 'Save changes'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary btn-sm"
+                      onClick={() => { setEditing(false); setLetterDraft(meta.cover_letter_text || '') }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="tailored-docs-panel__letter-body">
+                  {meta.cover_letter_text || 'No cover letter text yet.'}
+                </div>
+              )}
+            </div>
           )}
         </>
       )}

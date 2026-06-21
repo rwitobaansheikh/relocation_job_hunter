@@ -60,3 +60,18 @@ def get_current_profile(
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     return profile
+
+
+def require_active_plan(user: User = Depends(get_current_user)) -> User:
+    """Block expired-plan users from paid features (HTTP 402)."""
+    from app.services.plans import current_plan
+
+    if current_plan(user) == "expired":
+        raise HTTPException(
+            status_code=402,
+            detail=(
+                "Your plan has expired. Subscribe to continue tailoring documents, "
+                "sending outreach, and running automation."
+            ),
+        )
+    return user

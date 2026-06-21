@@ -13,6 +13,7 @@ from app.auth import (
     create_access_token,
     get_current_profile,
     get_current_user,
+    require_active_plan,
 )
 from app.config import settings
 from app.database import (
@@ -32,8 +33,10 @@ from app.schemas import (
     AutomationLoopResponse,
     AutomationLoopUpdate,
     AutomationRunResponse,
+    ChangePasswordRequest,
     ContactCreate,
     ContactResponse,
+    CoverLetterUpdateRequest,
     DeleteAccountRequest,
     FollowUpRequest,
     JobApplicationResponse,
@@ -51,6 +54,7 @@ from app.schemas import (
     SearchStatsResponse,
     SENIORITY_LEVELS,
     WORK_TYPES,
+    SendOutreachBatchRequest,
     SendOutreachRequest,
     SettingsResponse,
     SettingsUpdate,
@@ -151,6 +155,24 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
 @auth_router.get("/me", response_model=UserResponse)
 def me(user: User = Depends(get_current_user)):
     return user
+
+
+@auth_router.post("/change-password")
+def change_password(
+    data: ChangePasswordRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Change account password. OAuth users may set a password without the current one."""
+    if user.oauth_provider:
+        if data.current_password and not verify_password(data.current_password, user.password_hash):
+            raise HTTPException(status_code=403, detail="Current password is incorrect")
+    elif not verify_password(data.current_password, user.password_hash):
+        raise HTTPException(status_code=403, detail="Current password is incorrect")
+    user.password_hash = hash_password(data.new_password)
+    user.oauth_provider = ""
+    db.commit()
+    return {"ok": True}
 
 
 @router.delete("/account", status_code=204)
@@ -380,6 +402,7 @@ def update_settings(
 @router.post("/jobs/search")
 async def search_jobs(
     request: JobSearchRequest,
+    user: User = Depends(require_active_plan),
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
@@ -416,6 +439,7 @@ async def search_jobs(
 @router.post("/jobs/import", response_model=JobImportPreviewResponse)
 async def import_job(
     request: JobImportRequest,
+    user: User = Depends(require_active_plan),
     profile: UserProfile = Depends(get_current_profile),
 ):
     """Best-effort scrape of a pasted job URL. Returns extracted fields plus a
@@ -431,6 +455,7 @@ async def import_job(
 @router.post("/jobs/manual", response_model=JobApplicationResponse)
 def add_manual_job(
     request: ManualJobRequest,
+    user: User = Depends(require_active_plan),
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
@@ -591,10 +616,12 @@ def get_tailored_documents(
     cl_path = (app.tailored_cover_letter_path or "").strip()
 
     cover_text = ""
+    cv_preview = None
     if app.analysis_json:
         try:
             parsed = json.loads(app.analysis_json)
             cover_text = (parsed.get("cover_letter") or "").strip()
+            cv_preview = parsed.get("cv_preview")
         except Exception:
             pass
     if not cover_text and cl_path and Path(cl_path).exists():
@@ -604,9 +631,31 @@ def get_tailored_documents(
         has_cv=bool(cv_path and Path(cv_path).exists()),
         has_cover_letter=bool(cl_path and Path(cl_path).exists()),
         cover_letter_text=cover_text,
+        cv_preview=cv_preview if isinstance(cv_preview, dict) else None,
         cv_filename=Path(cv_path).name if cv_path else "",
         cover_letter_filename=Path(cl_path).name if cl_path else "",
     )
+
+
+@router.patch("/applications/{application_id}/cover-letter")
+def update_cover_letter_text(
+    application_id: int,
+    data: CoverLetterUpdateRequest,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    """Edit cover letter preview text before sending outreach."""
+    app = _owned_application(db, application_id, profile)
+    parsed: dict = {}
+    if app.analysis_json:
+        try:
+            parsed = json.loads(app.analysis_json)
+        except Exception:
+            parsed = {}
+    parsed["cover_letter"] = data.text.strip()
+    app.analysis_json = json.dumps(parsed)
+    db.commit()
+    return {"ok": True, "cover_letter_text": data.text.strip()}
 
 
 @router.get("/applications/{application_id}/documents/{doc_type}")
@@ -668,6 +717,7 @@ def update_application_status(
 @router.post("/applications/tailor", response_model=list[JobApplicationResponse])
 async def tailor_documents(
     request: TailorDocumentsRequest,
+    user: User = Depends(require_active_plan),
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
@@ -720,6 +770,7 @@ async def tailor_documents(
 @router.post("/applications/{application_id}/tailor", response_model=JobApplicationResponse)
 async def tailor_single(
     application_id: int,
+    user: User = Depends(require_active_plan),
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
@@ -744,7 +795,7 @@ async def tailor_single(
 @router.post("/applications/send-outreach", response_model=list[OutreachEmailResponse])
 async def send_outreach(
     request: SendOutreachRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_active_plan),
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
@@ -776,6 +827,57 @@ async def send_outreach(
         incr_usage(db, profile.id, "manual", 1)
         db.commit()
     return results
+
+
+@router.post("/applications/send-outreach-batch")
+async def send_outreach_batch(
+    request: SendOutreachBatchRequest,
+    user: User = Depends(require_active_plan),
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    """Send outreach to multiple tailored applications (bulk apply workflow)."""
+    limits = effective_limits(user)
+    owned = {
+        a.id
+        for a in db.query(JobApplication)
+        .filter(
+            JobApplication.user_profile_id == profile.id,
+            JobApplication.id.in_(request.application_ids),
+        )
+        .all()
+    }
+    ids = [i for i in request.application_ids if i in owned]
+    if not ids:
+        raise HTTPException(status_code=404, detail="No matching applications found")
+
+    if not request.dry_run:
+        used = get_usage(db, profile.id, "manual")
+        remaining = max(0, limits.manual_per_day - used)
+        if remaining <= 0:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"You've reached your plan's daily limit of {limits.manual_per_day} "
+                    "manual applications. Upgrade your plan to apply to more jobs today."
+                ),
+            )
+        ids = ids[:remaining]
+
+    service = EmailService()
+    summary = {"sent": 0, "failed": 0, "results": []}
+    for app_id in ids:
+        try:
+            results = await service.send_outreach(db, app_id, request.dry_run, False)
+            if not request.dry_run and any(r.status == "sent" for r in results):
+                incr_usage(db, profile.id, "manual", 1)
+                summary["sent"] += 1
+            summary["results"].append({"application_id": app_id, "emails": len(results), "ok": True})
+        except Exception as exc:
+            summary["failed"] += 1
+            summary["results"].append({"application_id": app_id, "ok": False, "error": str(exc)})
+    db.commit()
+    return summary
 
 
 @router.get("/applications/{application_id}/emails", response_model=list[OutreachEmailResponse])

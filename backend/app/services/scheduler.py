@@ -27,6 +27,11 @@ async def _tick() -> None:
         processed = await run_due_loops(db)
         if processed:
             logger.info("Automation tick processed %d loop(s)", processed)
+        from app.services.trial_notifications import process_trial_notifications
+
+        notified = await process_trial_notifications(db)
+        if notified:
+            logger.info("Trial notifications sent to %d user(s)", notified)
     except Exception:  # pragma: no cover - never let a tick crash the loop
         logger.exception("Automation tick failed")
     finally:

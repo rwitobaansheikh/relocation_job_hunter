@@ -75,8 +75,10 @@ class Settings(BaseSettings):
 
     # Where "Contact us" messages are delivered (the site owner's inbox).
     contact_email: str = "rwitobaansheikh@gmail.com"
-    # Length of the free trial granted to new accounts.
-    trial_days: int = 7
+    # Length of the free trial granted to new accounts (Stripe trial mirrors this).
+    trial_days: int = 3
+    # Default tier auto-subscribed after the free trial ends.
+    trial_default_tier: str = "basic"
 
     # --- OAuth (Google & LinkedIn) ---
     google_client_id: str = ""

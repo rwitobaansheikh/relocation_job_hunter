@@ -18,6 +18,7 @@ import Feedback from './pages/Feedback'
 import Admin from './pages/Admin'
 import AuthCallback from './pages/AuthCallback'
 import HelpButton from './components/HelpButton'
+import PlanGate from './components/PlanGate'
 
 function PlanBadge() {
   const [billing, setBilling] = useState(null)
@@ -108,7 +109,9 @@ function ProtectedLayout() {
           </div>
         </nav>
         <main className="main">
-          <Outlet />
+          <PlanGate>
+            <Outlet />
+          </PlanGate>
         </main>
       </div>
     </ProfileProvider>

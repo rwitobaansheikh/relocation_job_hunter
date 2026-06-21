@@ -210,9 +210,10 @@ class DocumentGenerator:
             except (TypeError, ValueError):
                 application.ai_match_score = 0
             analysis["cover_letter"] = tailored_cl
+            analysis["cv_preview"] = cv_data
             application.analysis_json = json.dumps(analysis)
         else:
-            application.analysis_json = json.dumps({"cover_letter": tailored_cl})
+            application.analysis_json = json.dumps({"cover_letter": tailored_cl, "cv_preview": cv_data})
         application.status = ApplicationStatus.TAILORED.value
         db.commit()
         db.refresh(application)

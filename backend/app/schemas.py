@@ -21,11 +21,17 @@ class DeleteAccountRequest(BaseModel):
     confirm: str = ""  # client sends "DELETE" to acknowledge permanence
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str = ""
+    new_password: str = Field(min_length=8)
+
+
 class UserResponse(BaseModel):
     id: int
     email: str
     role: str
     is_active: bool
+    oauth_provider: str = ""
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -138,10 +144,12 @@ class BillingResponse(BaseModel):
     plan_status: str
     trial_end: Optional[datetime] = None
     trial_days_left: int = 0
+    trial_days: int = 3
     current_period_end: Optional[datetime] = None
     unlimited_access: bool = False
     is_admin: bool = False
     stripe_configured: bool = False
+    has_stripe_subscription: bool = False
     limits: BillingLimits
     usage: BillingUsage
     tiers: list[BillingTier]
@@ -353,8 +361,13 @@ class TailoredDocumentsResponse(BaseModel):
     has_cv: bool = False
     has_cover_letter: bool = False
     cover_letter_text: str = ""
+    cv_preview: Optional[dict] = None
     cv_filename: str = ""
     cover_letter_filename: str = ""
+
+
+class CoverLetterUpdateRequest(BaseModel):
+    text: str = Field(min_length=10, max_length=8000)
 
 
 class JobApplicationResponse(BaseModel):
@@ -459,6 +472,11 @@ class SendOutreachRequest(BaseModel):
     application_id: int
     dry_run: bool = False
     test_to_self: bool = False
+
+
+class SendOutreachBatchRequest(BaseModel):
+    application_ids: list[int] = Field(min_length=1, max_length=50)
+    dry_run: bool = False
 
 
 class FollowUpRequest(BaseModel):

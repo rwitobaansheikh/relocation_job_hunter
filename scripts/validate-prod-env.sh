@@ -41,12 +41,15 @@ require OLLAMA_MODEL
 require HUNTER_API_KEY
 require SMTP_USER
 require SMTP_PASSWORD
+require SMTP_FROM
 require APP_BASE_URL
 require CORS_ORIGINS
+require TRIAL_DAYS
 
-# Phases 3–4 (warn only)
-warn_if_empty STRIPE_SECRET_KEY "Stripe (Phase 3)"
-warn_if_empty STRIPE_WEBHOOK_SECRET "Stripe webhook (Phase 3, after domain live)"
+# Stripe trial billing (required for auto-charge trial)
+warn_if_empty STRIPE_SECRET_KEY "Stripe secret key"
+warn_if_empty STRIPE_WEBHOOK_SECRET "Stripe webhook signing secret"
+warn_if_empty STRIPE_PRICE_BASIC "Stripe Basic price ID"
 warn_if_empty CLOUDFLARE_TUNNEL_TOKEN "Cloudflare tunnel (Phase 4)"
 
 warn_if_empty GOOGLE_CLIENT_ID "Google OAuth (social login)"
@@ -58,6 +61,9 @@ echo "=== Production env check: $ENV_FILE ==="
 echo "LLM_PROVIDER=${LLM_PROVIDER:-ollama}"
 echo "OLLAMA_MODEL=${OLLAMA_MODEL:-}"
 echo "APP_BASE_URL=${APP_BASE_URL:-}"
+echo "TRIAL_DAYS=${TRIAL_DAYS:-3}"
+echo "SMTP configured: $([[ -n "${SMTP_USER:-}" && -n "${SMTP_PASSWORD:-}" ]] && echo yes || echo no)"
+echo "Stripe configured: $([[ -n "${STRIPE_SECRET_KEY:-}" && -n "${STRIPE_WEBHOOK_SECRET:-}" ]] && echo yes || echo no)"
 
 if ((${#missing[@]})); then
   echo ""

@@ -1245,3 +1245,262 @@ label {
 .brand-logo .text-accent {
   color: var(--accent);
 }
+
+/* Plan gate & upgrade modal */
+.plan-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  margin-bottom: 1.25rem;
+  border-radius: var(--radius);
+  font-size: 0.92rem;
+  flex-wrap: wrap;
+}
+
+.plan-banner--expired {
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
+.plan-banner--warning {
+  background: color-mix(in srgb, var(--warning) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border));
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.modal-card {
+  width: min(420px, 100%);
+  padding: 1.75rem;
+  text-align: center;
+  animation: modal-in 0.2s ease-out;
+}
+
+.modal-card__icon {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+.modal-card__actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: center;
+  margin-top: 1.25rem;
+  flex-wrap: wrap;
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.trial-cta-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding: 1.25rem 1.5rem;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 8%, var(--surface)), var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  flex-wrap: wrap;
+}
+
+.landing-hero__badge {
+  display: inline-block;
+  padding: 0.35rem 0.85rem;
+  margin-bottom: 1rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 15%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  color: var(--accent);
+}
+
+/* Document preview */
+.doc-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0.75rem 0;
+}
+
+.doc-tab {
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.doc-tab--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.tailored-docs-panel__preview {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  max-height: 420px;
+  overflow: auto;
+}
+
+.tailored-docs-panel__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.cover-letter-editor {
+  width: 100%;
+  min-height: 220px;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.cv-preview__name {
+  font-size: 1.35rem;
+  font-weight: 800;
+  text-align: center;
+  margin-bottom: 0.25rem;
+}
+
+.cv-preview__contact {
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+.cv-preview__section {
+  margin-bottom: 1rem;
+}
+
+.cv-preview__heading {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.cv-preview__text {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin-bottom: 0.35rem;
+}
+
+.cv-preview__item {
+  margin-bottom: 0.75rem;
+}
+
+.cv-preview__item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.cv-preview__date {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.cv-preview__sub {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.cv-preview__bullet {
+  font-size: 0.85rem;
+  margin-left: 0.5rem;
+  line-height: 1.45;
+}
+
+/* Applications table (bulk apply) */
+.applications-toolbar--enhanced {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.view-toggle {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.view-toggle .active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.applications-table-wrap {
+  overflow-x: auto;
+  padding: 0;
+}
+
+.applications-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.applications-table th,
+.applications-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.applications-table th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  background: var(--surface-hover);
+}
+
+.applications-table__row--selected {
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
+
+.applications-table__actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}

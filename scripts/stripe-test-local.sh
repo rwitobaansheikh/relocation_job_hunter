@@ -23,4 +23,4 @@ echo ""
 
 stripe listen \
   --forward-to localhost:8000/api/webhooks/stripe \
-  --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.payment_failed
+  --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,customer.subscription.trial_will_end,invoice.payment_failed,invoice.payment_succeeded

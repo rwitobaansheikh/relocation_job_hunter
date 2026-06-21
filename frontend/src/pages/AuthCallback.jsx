@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
+import { redirectToTrialCheckoutIfNeeded } from '../utils/trialCheckout'
 
 export default function AuthCallback() {
   const [searchParams] = useSearchParams()
@@ -22,7 +23,10 @@ export default function AuthCallback() {
     }
 
     loginWithToken(token)
-      .then(() => navigate('/app', { replace: true }))
+      .then(async () => {
+        const redirected = await redirectToTrialCheckoutIfNeeded()
+        if (!redirected) navigate('/app', { replace: true })
+      })
       .catch((err) => setError(err.message || 'Login failed'))
   }, [searchParams, navigate, loginWithToken])
 
