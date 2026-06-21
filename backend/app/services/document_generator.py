@@ -18,13 +18,29 @@ from app.services.cv_link_extractor import (
     format_links_for_prompt,
     get_project_links_for_profile,
 )
-from app.services.docx_renderer import document_filename, render_cover_letter_docx, render_resume_docx
+from app.services.docx_renderer import (
+    cv_layout_prompt_reference,
+    document_filename,
+    render_cover_letter_docx,
+    render_resume_docx,
+)
 from app.services.llm import llm_available, llm_generate, resolve_gemini_api_key
 from app.services.job_analyzer import JobAnalyzer
 
 logger = logging.getLogger(__name__)
 
-_ALLOWED_SECTION_TYPES = {"summary", "experience", "education", "projects", "skills"}
+_SECTION_ORDER = ["summary", "education", "experience", "projects", "skills"]
+_ALLOWED_SECTION_TYPES = set(_SECTION_ORDER)
+
+
+def _sort_resume_sections(data: dict) -> dict:
+    sections = [s for s in (data.get("sections") or []) if isinstance(s, dict)]
+    order_map = {t: i for i, t in enumerate(_SECTION_ORDER)}
+    sections.sort(key=lambda s: order_map.get(s.get("type") or "", 99))
+    data["sections"] = sections
+    return data
+
+
 _GEMINI_PACE_SECONDS = 2.5
 _BATCH_PACE_SECONDS = 5.0
 _AI_FAILURE_MSG = (
@@ -154,6 +170,7 @@ class DocumentGenerator:
             raise ValueError(_AI_FAILURE_MSG)
 
         cv_data = self._apply_profile_identity(cv_data, profile, cv_text)
+        cv_data = _sort_resume_sections(cv_data)
         cv_docx = out_dir / document_filename(profile.full_name, job.title, "CV")
         if not render_resume_docx(cv_data, str(cv_docx)):
             raise ValueError("Failed to render the tailored CV to Word format. Please retry.")
@@ -291,23 +308,27 @@ class DocumentGenerator:
   "name": "Full Name",
   "contact": {"phone": "", "email": "", "linkedin": "", "github": "", "location": ""},
   "sections": [
-    {"type": "summary", "title": "Professional Summary", "text": "2-3 sentence tailored summary"},
-    {"type": "skills", "title": "Technical Skills", "groups": [
-      {"label": "Category", "value": "comma-separated skills"}
+    {"type": "summary", "title": "Professional Summary", "text": "3-4 sentence tailored summary"},
+    {"type": "education", "title": "Education", "items": [
+      {"heading": "University of Bath", "location": "Bath, UK", "subheading": "MSc in Machine Learning (Merit)", "date": "Jan 2025", "bullets": ["optional detail with en-dash style content"]}
     ]},
     {"type": "experience", "title": "Work Experience", "items": [
-      {"heading": "Company (Client)", "location": "City, Country", "subheading": "Job Title", "date": "Start -- End", "bullets": ["achievement with metrics"]}
+      {"heading": "Tata Consultancy Services (Client: Equifax USA)", "location": "Mumbai, India", "subheading": "Data Engineer", "date": "April 2022 - Aug 2023", "bullets": ["achievement with metrics"]}
     ]},
     {"type": "projects", "title": "Technical Projects", "items": [
-      {"heading": "Project Name", "tech": "Tech, Stack", "date": "Year", "bullets": ["impact bullet"], "links": [{"label": "Source Code", "url": "https://..."}]}
+      {"heading": "Project Name (context)", "tech": "PyTorch, Python, Flask", "date": "2024", "bullets": ["impact bullet"], "links": [{"label": "Source Code", "url": "https://..."}, {"label": "Live Project", "url": "https://..."}]}
     ]},
-    {"type": "education", "title": "Education", "items": [
-      {"heading": "Institution", "location": "City, Country", "subheading": "Degree (grade)", "date": "Year", "bullets": ["optional detail"]}
+    {"type": "skills", "title": "Technical Skills", "groups": [
+      {"label": "AI/ML", "value": "PyTorch, TensorFlow, Deep Learning"},
+      {"label": "Cloud/DevOps", "value": "AWS, GCP, Docker, Terraform"}
     ]}
   ]
 }"""
 
+        layout_spec = cv_layout_prompt_reference()
+
         prompt = f"""You are an expert CV writer. Rewrite the source CV into an ATS-friendly version tailored to the target role.
+The output will be rendered to Microsoft Word using a fixed LaTeX-style template — follow the layout spec exactly.
 
 TARGET ROLE: {job.title}
 JOB DESCRIPTION (use for keyword matching):
@@ -318,23 +339,19 @@ Tailoring means re-emphasising, reordering, and rewording REAL content from the 
 Return ONLY a single JSON object matching this schema (no markdown fences, no commentary):
 {schema}
 
-ATS & CONTENT RULES:
-1. Maximum 2 A4 pages worth of content (700-800 words total). Cut the least-relevant bullets/projects instead of padding.
-2. UK English spelling throughout (optimise, organise, specialise, programme for courses).
-3. Write a 3-4 sentence professional summary specific to the target role from real achievements in the source CV.
-4. Reorder/regroup skills so keywords relevant to the target role and job description come first.
-5. For each job, select 2-4 bullets most relevant to the target role; lightly reword; cut the rest.
-6. Pick the most relevant projects and angle bullets toward the role (same facts, different emphasis).
-7. Experience in strict reverse chronological order (most recent first).
-8. Every job entry needs subheading = job title and heading = organisation. Every education entry needs a full date range.
-9. Use plain hyphens in date ranges (e.g. Jan 2020 - Mar 2023), never em/en dashes.
-10. Projects must be clearly personal/academic (not paid employment). Use date field for year.
-11. Avoid AI clichés: leverage, robust, seamless, cutting-edge, dynamic, passionate, results-driven, synergy.
-12. Vary bullet structure; do not start consecutive bullets with the same verb; expand acronyms on first use.
-13. Describe code in plain English; no literal class/variable names; no square-bracket placeholders.
-14. Allowed section types only: summary, skills, experience, projects, education.
-15. Use section titles suitable for ATS: Professional Summary, Key Skills, Professional Experience, Projects, Education.
-16. For projects: include "links" array only from ORIGINAL PROJECT LINKS below — never invent URLs.
+{layout_spec}
+
+CONTENT RULES:
+1. Maximum 2 A4 pages (700-800 words). Cut least-relevant bullets/projects instead of padding.
+2. UK English spelling (optimise, organise, specialise, programme for courses).
+3. Tailor summary, skills order, and bullet emphasis to the target role and job description keywords.
+4. Experience in strict reverse chronological order (most recent first).
+5. Pick 2-4 bullets per job and 2-3 most relevant projects; angle wording toward the target role.
+6. Use plain hyphens in date ranges (April 2022 - Aug 2023), not em/en dashes in the date field.
+7. Avoid AI clichés: leverage, robust, seamless, cutting-edge, dynamic, passionate, results-driven, synergy.
+8. Vary bullet verbs; expand acronyms on first use; describe code in plain English.
+9. No square-bracket placeholders. Bullet strings must NOT include a leading dash (the renderer adds it).
+10. Project links: copy ONLY from ORIGINAL PROJECT LINKS below — never invent URLs.
 
 ORIGINAL PROJECT LINKS (copy exactly):
 {links_prompt or "(none found — omit links arrays)"}
@@ -342,9 +359,9 @@ ORIGINAL PROJECT LINKS (copy exactly):
 SOURCE CV:
 {cv_text[:6000]}
 
-CANDIDATE CONTACT (use in contact object):
+CANDIDATE CONTACT (populate contact object — phone and email required when known):
 - Name: {profile.full_name}
-- Email: {profile.email} | Phone: {profile.phone} | LinkedIn: {profile.linkedin_url} | Location: {profile.location}
+- Email: {profile.email} | Phone: {profile.phone} | LinkedIn: {profile.linkedin_url}
 - Skills: {profile.skills}
 - Open to relocation to: {profile.target_countries}
 
@@ -353,7 +370,11 @@ IMPROVEMENT SUGGESTIONS (address truthfully): {gaps_text}
 
         result = await llm_generate(
             prompt,
-            system="You are an expert CV writer producing ATS-friendly CVs as strict JSON for Word export.",
+            system=(
+                "You are an expert CV writer producing strict JSON for a LaTeX-style Word CV template. "
+                "Match the reference layout: centred name/contact, ruled section headers, "
+                "two-column entry rows (org left/date right), en-dash bullets, skills at end."
+            ),
             temperature=0.4,
             max_tokens=4096,
             api_key=api_key,
