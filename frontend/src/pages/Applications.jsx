@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
+import ApplyOnSiteButton from '../components/ApplyOnSiteButton'
 import JobDescription from '../components/JobDescription'
 import HelpButton from '../components/HelpButton'
 import OnboardingGuide from '../components/OnboardingGuide'
@@ -12,26 +13,26 @@ const FIRST_APP_STEPS = [
   {
     step: 1,
     title: 'Upload your CV',
-    body: 'Add your CV and cover letter in Profile so the AI can tailor documents for each role.',
+    body: 'Add your CV in Profile so the AI can tailor an ATS-friendly version for each role.',
     to: '/app/profile',
     linkLabel: 'Go to Profile →',
   },
   {
     step: 2,
-    title: 'Search for jobs',
-    body: 'Pick one location and run a search. New matches are saved here automatically.',
+    title: 'Search jobs in one place',
+    body: 'Run a search across LinkedIn, RemoteOK, Remotive, and more. Matches save here automatically.',
     to: '/app/jobs',
     linkLabel: 'Search jobs →',
   },
   {
     step: 3,
-    title: 'Tailor your documents',
-    body: 'Click Tailor on a job card. The AI rewrites your CV and cover letter for that role.',
+    title: 'Tailor CV & cover letter',
+    body: 'Generate role-specific documents for each job — preview, edit, and download as Word files.',
   },
   {
     step: 4,
-    title: 'Review & send',
-    body: 'Open your tailored CV and cover letter, preview the email, then send outreach.',
+    title: 'Apply on the job site',
+    body: 'Open the listing, upload your tailored documents, and submit the application yourself.',
   },
 ]
 
@@ -47,15 +48,9 @@ export default function Applications() {
   const [loading, setLoading] = useState(true)
   const [actionMsg, setActionMsg] = useState(null)
   const [busy, setBusy] = useState(null)
-  const [emailsByApp, setEmailsByApp] = useState({})
-  const [expandedEmails, setExpandedEmails] = useState(null)
-  const [contactsByApp, setContactsByApp] = useState({})
-  const [expandedContacts, setExpandedContacts] = useState(null)
-  const [loadingContacts, setLoadingContacts] = useState(null)
   const [expandedAnalysis, setExpandedAnalysis] = useState(null)
   const [expandedDesc, setExpandedDesc] = useState(null)
   const [expandedDocs, setExpandedDocs] = useState(null)
-  const [selected, setSelected] = useState(new Set())
   const [viewMode, setViewMode] = useState('table')
 
   const parseAnalysis = (app) => {
@@ -80,35 +75,40 @@ export default function Applications() {
 
   useEffect(() => { loadApps() }, [loadApps])
 
-  const handleAction = async (action, appId) => {
+  const handleTailor = async (appId) => {
     setBusy(appId)
     setActionMsg(null)
     try {
-      if (action === 'tailor') {
-        const app = await api.tailorSingle(appId)
-        setActionMsg({ type: 'success', text: 'Documents tailored. Open them below to review before sending.' })
-        setExpandedDocs(appId)
-      } else if (action === 'send') {
-        await api.sendOutreach(appId, false)
-        setActionMsg({ type: 'success', text: 'Outreach emails sent' })
-      } else if (action === 'dry-run') {
-        const emails = await api.sendOutreach(appId, true)
-        setActionMsg({ type: 'info', text: `Preview ready for ${emails.length} email(s).` })
-        await refreshEmails(appId, true)
-      } else if (action === 'test') {
-        const emails = await api.sendOutreach(appId, false, true)
-        const result = emails[0]
-        if (result?.status === 'test_sent') {
-          setActionMsg({ type: 'success', text: `Test email sent to ${result.recipient_email}` })
-        } else {
-          setActionMsg({ type: 'error', text: `Test send failed: ${result?.error_message || 'unknown error'}` })
-        }
-        await refreshEmails(appId, true)
-      } else if (action === 'follow-up') {
-        await api.scheduleFollowUp(appId, 'Follow-up sent', 7)
-        setActionMsg({ type: 'success', text: 'Follow-up scheduled' })
-      }
+      await api.tailorSingle(appId)
+      setActionMsg({ type: 'success', text: 'Documents ready — preview, download, then apply on the job site.' })
+      setExpandedDocs(appId)
       await loadApps()
+    } catch (err) {
+      setActionMsg({ type: 'error', text: err.message })
+    }
+    setBusy(null)
+  }
+
+  const handleManualApply = async (app, markApplied = true) => {
+    const url = app.job?.url
+    if (!url) {
+      setActionMsg({ type: 'error', text: 'This job has no listing URL. Add one via Jobs → Import link.' })
+      return
+    }
+    setBusy(`apply-${app.id}`)
+    setActionMsg(null)
+    window.open(url, '_blank', 'noopener,noreferrer')
+    try {
+      if (markApplied && !['applied', 'interview', 'replied'].includes(app.status)) {
+        await api.updateStatus(app.id, 'applied')
+        await loadApps()
+      }
+      setActionMsg({
+        type: 'success',
+        text: markApplied
+          ? 'Job listing opened in a new tab. Status marked as applied — upload your tailored CV & cover letter there.'
+          : 'Job listing opened in a new tab.',
+      })
     } catch (err) {
       setActionMsg({ type: 'error', text: err.message })
     }
@@ -125,7 +125,7 @@ export default function Applications() {
         const tailored = await api.tailorDocuments(discovered)
         setActionMsg({
           type: 'success',
-          text: `Tailored ${tailored.length} application(s). Open each card to review CV and cover letter.`,
+          text: `Tailored ${tailored.length} application(s). Download docs and apply on each job site.`,
         })
         await loadApps()
       }
@@ -140,22 +140,16 @@ export default function Applications() {
     await loadApps()
   }
 
-  const handleBulkSend = async () => {
-    const ids = applications.filter((a) => selected.has(a.id) && a.status === 'tailored').map((a) => a.id)
-    if (ids.length === 0) {
-      setActionMsg({ type: 'info', text: 'Select tailored applications to send outreach.' })
-      return
-    }
-    if (!window.confirm(`Send outreach for ${ids.length} application(s)?`)) return
-    setBusy('bulk-send')
+  const handleReject = async (app) => {
+    if (app.status === 'rejected') return
+    setBusy(`reject-${app.id}`)
     setActionMsg(null)
     try {
-      const res = await api.sendOutreachBatch(ids)
+      await api.updateStatus(app.id, 'rejected')
       setActionMsg({
-        type: res.failed ? 'info' : 'success',
-        text: `Sent ${res.sent} application(s)${res.failed ? `, ${res.failed} failed` : ''}.`,
+        type: 'success',
+        text: `Moved "${app.job?.title || 'application'}" to rejected.`,
       })
-      setSelected(new Set())
       await loadApps()
     } catch (err) {
       setActionMsg({ type: 'error', text: err.message })
@@ -163,23 +157,50 @@ export default function Applications() {
     setBusy(null)
   }
 
-  const toggleSelect = (appId) => {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(appId)) next.delete(appId)
-      else next.add(appId)
-      return next
-    })
+  const handleDelete = async (app) => {
+    const label = app.job?.title || 'this application'
+    if (!window.confirm(`Delete "${label}" permanently? This removes the application and any tailored documents.`)) {
+      return
+    }
+    setBusy(`delete-${app.id}`)
+    setActionMsg(null)
+    try {
+      await api.deleteApplication(app.id)
+      if (expandedDocs === app.id) setExpandedDocs(null)
+      if (expandedDesc === app.id) setExpandedDesc(null)
+      if (expandedAnalysis === app.id) setExpandedAnalysis(null)
+      setActionMsg({ type: 'success', text: `Removed "${label}".` })
+      await loadApps()
+    } catch (err) {
+      setActionMsg({ type: 'error', text: err.message })
+    }
+    setBusy(null)
   }
 
-  const toggleSelectAll = () => {
-    const tailored = applications.filter((a) => a.status === 'tailored')
-    if (selected.size === tailored.length && tailored.length > 0) {
-      setSelected(new Set())
-    } else {
-      setSelected(new Set(tailored.map((a) => a.id)))
-    }
-  }
+  const renderManageButtons = (app, compact = false) => (
+    <>
+      {app.status !== 'rejected' && (
+        <HelpButton
+          className={`btn-secondary${compact ? ' btn-sm' : ''}`}
+          disabled={busy === `reject-${app.id}`}
+          onClick={() => handleReject(app)}
+          title="Mark rejected"
+          help="Move this application to your rejected pile when you're not pursuing the role."
+        >
+          {busy === `reject-${app.id}` ? 'Updating…' : 'Mark rejected'}
+        </HelpButton>
+      )}
+      <HelpButton
+        className={`btn-danger${compact ? ' btn-sm' : ''}`}
+        disabled={busy === `delete-${app.id}`}
+        onClick={() => handleDelete(app)}
+        title="Delete application"
+        help="Permanently removes this job application and its tailored documents."
+      >
+        {busy === `delete-${app.id}` ? 'Deleting…' : 'Delete'}
+      </HelpButton>
+    </>
+  )
 
   const handleClearAll = async () => {
     if (applications.length === 0) {
@@ -199,62 +220,15 @@ export default function Applications() {
     setBusy(null)
   }
 
-  const refreshEmails = async (appId, expand = false) => {
-    try {
-      const emails = await api.getOutreachEmails(appId)
-      setEmailsByApp((prev) => ({ ...prev, [appId]: emails }))
-      if (expand) setExpandedEmails(appId)
-    } catch (err) {
-      console.error(err)
-    }
-  }
-
-  const toggleEmails = async (appId) => {
-    if (expandedEmails === appId) {
-      setExpandedEmails(null)
-      return
-    }
-    setExpandedDesc(null)
-    setExpandedContacts(null)
-    setExpandedAnalysis(null)
-    setExpandedDocs(null)
-    await refreshEmails(appId, true)
-  }
-
-  const toggleContacts = async (appId) => {
-    if (expandedContacts === appId) {
-      setExpandedContacts(null)
-      return
-    }
-    setExpandedContacts(appId)
-    setExpandedDesc(null)
-    setExpandedEmails(null)
-    setExpandedAnalysis(null)
-    setExpandedDocs(null)
-    setLoadingContacts(appId)
-    try {
-      const contacts = await api.getContacts(appId)
-      setContactsByApp((prev) => ({ ...prev, [appId]: contacts }))
-    } catch (err) {
-      setActionMsg({ type: 'error', text: `Could not find contacts: ${err.message}` })
-    }
-    setLoadingContacts(null)
-  }
-
-
   const toggleDocs = (appId) => {
     setExpandedDocs((prev) => (prev === appId ? null : appId))
     setExpandedDesc(null)
-    setExpandedEmails(null)
-    setExpandedContacts(null)
     setExpandedAnalysis(null)
   }
 
   const toggleDesc = (appId) => {
     setExpandedDesc((prev) => (prev === appId ? null : appId))
     setExpandedDocs(null)
-    setExpandedEmails(null)
-    setExpandedContacts(null)
     setExpandedAnalysis(null)
   }
 
@@ -262,9 +236,39 @@ export default function Applications() {
     setExpandedAnalysis((prev) => (prev === appId ? null : appId))
     setExpandedDocs(null)
     setExpandedDesc(null)
-    setExpandedEmails(null)
-    setExpandedContacts(null)
   }
+
+  const renderExpandedPanels = (app) => (
+    <>
+      <TailoredDocuments
+        applicationId={app.id}
+        jobUrl={app.job?.url}
+        open={expandedDocs === app.id}
+        onClose={() => setExpandedDocs(null)}
+        onApply={() => handleManualApply(app)}
+      />
+      {expandedDesc === app.id && (
+        <div className="application-card__panel">
+          <div className="application-card__panel-title">Job description</div>
+          <JobDescription html={app.job?.description} />
+        </div>
+      )}
+      {expandedAnalysis === app.id && (() => {
+        const a = parseAnalysis(app)
+        if (!a) return <div className="application-card__panel"><p className="muted">No analysis available.</p></div>
+        return (
+          <div className="application-card__panel">
+            <div className="application-card__panel-title">AI match — {a.match_score ?? app.ai_match_score}/100</div>
+            {Array.isArray(a.score_explanation) && a.score_explanation.map((b, i) => (
+              <div key={i} style={{ fontSize: '0.85rem', marginBottom: '0.4rem' }}>
+                <strong>{b.category}:</strong> {b.score}
+              </div>
+            ))}
+          </div>
+        )
+      })()}
+    </>
+  )
 
   if (!profile) {
     return <div className="empty-state"><p>Create your profile first.</p></div>
@@ -298,13 +302,13 @@ export default function Applications() {
         </div>
       </div>
       <p className="page-subtitle">
-        Bulk-apply workflow: tailor documents in batch, review CV & cover letter previews, then send outreach to multiple jobs.
+        Search jobs in one place, tailor your CV and cover letter per role, then apply manually on each job site.
       </p>
 
       {showOnboarding && (
         <OnboardingGuide
           storageKey="jh_onboarding_first_app"
-          title="Your first application in 4 steps"
+          title="Your application workflow"
           steps={FIRST_APP_STEPS}
         />
       )}
@@ -333,17 +337,6 @@ export default function Applications() {
             Cards
           </button>
         </div>
-        {selected.size > 0 && (
-          <HelpButton
-            className="btn-primary btn-sm"
-            disabled={busy === 'bulk-send'}
-            onClick={handleBulkSend}
-            title="Send selected"
-            help="Send outreach emails for all selected tailored applications."
-          >
-            {busy === 'bulk-send' ? 'Sending…' : `Send ${selected.size} selected`}
-          </HelpButton>
-        )}
       </div>
 
       {loading ? (
@@ -358,17 +351,6 @@ export default function Applications() {
           <table className="applications-table">
             <thead>
               <tr>
-                <th>
-                  <input
-                    type="checkbox"
-                    aria-label="Select all tailored"
-                    checked={
-                      applications.filter((a) => a.status === 'tailored').length > 0
-                      && selected.size === applications.filter((a) => a.status === 'tailored').length
-                    }
-                    onChange={toggleSelectAll}
-                  />
-                </th>
                 <th>Role</th>
                 <th>Company</th>
                 <th>Match</th>
@@ -378,16 +360,7 @@ export default function Applications() {
             </thead>
             <tbody>
               {applications.map((app) => (
-                <tr key={app.id} className={selected.has(app.id) ? 'applications-table__row--selected' : ''}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(app.id)}
-                      disabled={app.status !== 'tailored'}
-                      onChange={() => toggleSelect(app.id)}
-                      aria-label={`Select ${app.job?.title}`}
-                    />
-                  </td>
+                <tr key={app.id}>
                   <td>
                     <strong>{app.job?.title || 'Unknown'}</strong>
                     {app.job?.location && <div className="muted">{app.job.location}</div>}
@@ -397,32 +370,31 @@ export default function Applications() {
                   <td><span className={`badge badge-${app.status}`}>{app.status.replace('_', ' ')}</span></td>
                   <td className="applications-table__actions">
                     {app.status === 'discovered' && (
-                      <button type="button" className="btn-primary btn-sm" disabled={busy === app.id} onClick={() => handleAction('tailor', app.id)}>
-                        Tailor
+                      <button type="button" className="btn-primary btn-sm" disabled={busy === app.id} onClick={() => handleTailor(app.id)}>
+                        {busy === app.id ? 'Tailoring…' : 'Tailor'}
                       </button>
                     )}
                     {hasTailoredDocs(app) && (
                       <button type="button" className="btn-secondary btn-sm" onClick={() => toggleDocs(app.id)}>
-                        Preview
+                        Docs
                       </button>
                     )}
-                    {app.status === 'tailored' && (
-                      <button type="button" className="btn-primary btn-sm" disabled={busy === app.id} onClick={() => handleAction('send', app.id)}>
-                        Send
-                      </button>
-                    )}
+                    <ApplyOnSiteButton
+                      jobUrl={app.job?.url}
+                      onApply={() => handleManualApply(app, hasTailoredDocs(app))}
+                      busy={busy === `apply-${app.id}`}
+                      className={hasTailoredDocs(app) ? 'btn-primary' : 'btn-secondary'}
+                      size="btn-sm"
+                      label={hasTailoredDocs(app) ? 'Apply on site' : 'View listing'}
+                    />
+                    {renderManageButtons(app, true)}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
           {applications.map((app) => (
-            <TailoredDocuments
-              key={`docs-${app.id}`}
-              applicationId={app.id}
-              open={expandedDocs === app.id}
-              onClose={() => setExpandedDocs(null)}
-            />
+            <div key={`panels-${app.id}`}>{renderExpandedPanels(app)}</div>
           ))}
         </div>
       ) : (
@@ -441,11 +413,6 @@ export default function Applications() {
                   </p>
                   <div className="application-card__tags">
                     <span className={`badge badge-${app.status}`}>{app.status.replace('_', ' ')}</span>
-                    {app.job?.url && (
-                      <a href={app.job.url} target="_blank" rel="noreferrer" className="application-card__link">
-                        View listing →
-                      </a>
-                    )}
                   </div>
                 </div>
                 <select
@@ -462,187 +429,65 @@ export default function Applications() {
 
               {hasTailoredDocs(app) && (
                 <div className="application-card__ready">
-                  <span>Tailored documents ready</span>
-                  <button
-                    type="button"
-                    className="btn-primary btn-sm"
-                    onClick={() => toggleDocs(app.id)}
-                  >
-                    {expandedDocs === app.id ? 'Hide documents' : 'View CV & Cover Letter'}
+                  <span>Tailored CV & cover letter ready</span>
+                  <button type="button" className="btn-secondary btn-sm" onClick={() => toggleDocs(app.id)}>
+                    {expandedDocs === app.id ? 'Hide documents' : 'Preview & download'}
                   </button>
                 </div>
               )}
 
-              <div className="application-card__primary">
+              <div className="application-card__primary application-card__primary--apply">
                 {app.status === 'discovered' && (
                   <HelpButton
                     className="btn-primary"
                     disabled={busy === app.id}
-                    onClick={() => handleAction('tailor', app.id)}
+                    onClick={() => handleTailor(app.id)}
                     title="Tailor documents"
-                    help="AI rewrites your CV and cover letter for this specific job."
+                    help="AI generates a CV360-style CV and cover letter tailored to this job."
                   >
-                    {busy === app.id ? 'Tailoring…' : '1. Tailor documents'}
+                    {busy === app.id ? 'Tailoring…' : '1. Tailor CV & cover letter'}
                   </HelpButton>
                 )}
-                {app.status === 'tailored' && (
-                  <>
-                    <HelpButton
-                      className="btn-primary"
-                      disabled={busy === app.id}
-                      onClick={() => handleAction('send', app.id)}
-                      title="Send outreach"
-                      help="Finds recruiter contacts and sends your tailored application."
-                    >
-                      {busy === app.id ? 'Sending…' : '3. Send outreach'}
-                    </HelpButton>
-                    <HelpButton
-                      className="btn-secondary"
-                      disabled={busy === app.id}
-                      onClick={() => handleAction('test', app.id)}
-                      title="Send test to me"
-                      help="Sends a copy to your own inbox so you can review formatting."
-                    >
-                      Send test to me
-                    </HelpButton>
-                  </>
-                )}
-                {(app.status === 'applied' || app.status === 'follow_up_sent') && (
+                {hasTailoredDocs(app) && (
                   <HelpButton
                     className="btn-secondary"
-                    disabled={busy === app.id}
-                    onClick={() => handleAction('follow-up', app.id)}
-                    title="Log follow-up"
-                    help="Records a follow-up and schedules the next reminder."
+                    onClick={() => toggleDocs(app.id)}
+                    title="Preview documents"
+                    help="Review, edit, and download your tailored Word documents."
                   >
-                    Log follow-up
+                    2. Preview & download
                   </HelpButton>
                 )}
+                <ApplyOnSiteButton
+                  jobUrl={app.job?.url}
+                  onApply={() => handleManualApply(app, hasTailoredDocs(app))}
+                  busy={busy === `apply-${app.id}`}
+                  className="btn-primary"
+                  label={hasTailoredDocs(app) ? '3. Apply on job site' : 'View job listing'}
+                />
               </div>
 
               <details className="application-card__more">
                 <summary>More options</summary>
                 <div className="application-card__more-actions">
-                  {app.status === 'tailored' && (
-                    <HelpButton
-                      className="btn-secondary btn-sm"
-                      disabled={busy === app.id}
-                      onClick={() => handleAction('dry-run', app.id)}
-                      title="Preview email"
-                      help="Shows the outreach email without sending it."
-                    >
-                      Preview email
-                    </HelpButton>
-                  )}
-                  {hasTailoredDocs(app) && (
-                    <button
-                      type="button"
-                      className="btn-secondary btn-sm"
-                      onClick={() => toggleDocs(app.id)}
-                    >
-                      View tailored docs
-                    </button>
-                  )}
                   {app.job?.description && (
-                    <button
-                      type="button"
-                      className="btn-secondary btn-sm"
-                      onClick={() => toggleDesc(app.id)}
-                    >
+                    <button type="button" className="btn-secondary btn-sm" onClick={() => toggleDesc(app.id)}>
                       {expandedDesc === app.id ? 'Hide description' : 'Job description'}
                     </button>
                   )}
                   {app.analysis_json && (
-                    <button
-                      type="button"
-                      className="btn-secondary btn-sm"
-                      onClick={() => toggleAnalysis(app.id)}
-                    >
+                    <button type="button" className="btn-secondary btn-sm" onClick={() => toggleAnalysis(app.id)}>
                       {expandedAnalysis === app.id ? 'Hide analysis' : 'AI match analysis'}
                     </button>
                   )}
-                  <button
-                    type="button"
-                    className="btn-secondary btn-sm"
-                    disabled={loadingContacts === app.id}
-                    onClick={() => toggleContacts(app.id)}
-                  >
-                    {expandedContacts === app.id ? 'Hide contacts' : 'Find contacts'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary btn-sm"
-                    onClick={() => toggleEmails(app.id)}
-                  >
-                    {expandedEmails === app.id ? 'Hide emails' : 'View emails'}
-                  </button>
                 </div>
               </details>
 
-              <TailoredDocuments
-                applicationId={app.id}
-                open={expandedDocs === app.id}
-                onClose={() => setExpandedDocs(null)}
-              />
+              <div className="application-card__manage">
+                {renderManageButtons(app)}
+              </div>
 
-              {expandedDesc === app.id && (
-                <div className="application-card__panel">
-                  <div className="application-card__panel-title">Job description</div>
-                  <JobDescription html={app.job?.description} />
-                </div>
-              )}
-
-              {expandedAnalysis === app.id && (() => {
-                const a = parseAnalysis(app)
-                if (!a) return <div className="application-card__panel"><p className="muted">No analysis available.</p></div>
-                return (
-                  <div className="application-card__panel">
-                    <div className="application-card__panel-title">AI match — {a.match_score ?? app.ai_match_score}/100</div>
-                    {Array.isArray(a.score_explanation) && a.score_explanation.map((b, i) => (
-                      <div key={i} style={{ fontSize: '0.85rem', marginBottom: '0.4rem' }}>
-                        <strong>{b.category}:</strong> {b.score}
-                      </div>
-                    ))}
-                  </div>
-                )
-              })()}
-
-              {expandedContacts === app.id && (
-                <div className="application-card__panel">
-                  <div className="application-card__panel-title">Contacts for {app.job?.company}</div>
-                  {loadingContacts === app.id ? (
-                    <p className="muted">Searching…</p>
-                  ) : (contactsByApp[app.id] || []).length === 0 ? (
-                    <p className="muted">No contacts found.</p>
-                  ) : (
-                    (contactsByApp[app.id] || []).map((c, i) => (
-                      <div key={`${c.email}-${i}`} className="email-record">
-                        <strong>{c.name || c.email}</strong>
-                        {c.title && <span className="muted"> · {c.title}</span>}
-                        <div><a href={`mailto:${c.email}`}>{c.email}</a></div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-
-              {expandedEmails === app.id && (
-                <div className="application-card__panel">
-                  <div className="application-card__panel-title">Outreach emails</div>
-                  {(emailsByApp[app.id] || []).length === 0 ? (
-                    <p className="muted">No emails yet. Preview or send outreach to create one.</p>
-                  ) : (
-                    (emailsByApp[app.id] || []).map((em) => (
-                      <div key={em.id} className="email-record">
-                        <span className={`badge badge-${em.status}`}>{em.status}</span>
-                        <strong> {em.recipient_name || em.recipient_email}</strong>
-                        <div className="muted" style={{ marginTop: '0.3rem' }}>{em.subject}</div>
-                        <div className="email-body">{em.body}</div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
+              {renderExpandedPanels(app)}
             </article>
           ))}
         </div>

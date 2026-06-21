@@ -1,4 +1,4 @@
-"""Render CVs and cover letters as Word .docx matching the LaTeX-style resume template."""
+"""Render CVs and cover letters as Word .docx matching the CV360 ATS-friendly layout."""
 
 import logging
 import re
@@ -12,15 +12,18 @@ from docx.shared import Inches, Pt
 
 logger = logging.getLogger(__name__)
 
-_FONT = "Times New Roman"
-_RIGHT_TAB = Inches(7.15)
+# Calibri parses cleanly in Word and most ATS systems (matches CV360 exports).
+_FONT = "Calibri"
+_RIGHT_TAB = Inches(7.0)
 
 _DEFAULT_SECTION_TITLES = {
-    "summary": "Professional Summary",
-    "education": "Education",
-    "experience": "Work Experience",
-    "projects": "Technical Projects",
-    "skills": "Technical Skills",
+    "summary": "PROFESSIONAL SUMMARY",
+    "skills": "TECHNICAL SKILLS",
+    "soft_skills": "SOFT SKILLS",
+    "experience": "PROFESSIONAL EXPERIENCE",
+    "projects": "PROJECTS",
+    "certifications": "CERTIFICATIONS & CONTINUOUS LEARNING",
+    "education": "EDUCATION",
 }
 
 
@@ -47,47 +50,69 @@ def document_filename(full_name: str, job_title: str, label: str) -> str:
 
 
 def cv_layout_prompt_reference() -> str:
-    """Layout spec for the LLM — mirrors uploads/profile_*_cv.pdf and resume.html."""
+    """Layout spec for the LLM — mirrors CV360-approved ATS structure."""
     return """
-VISUAL LAYOUT (the Word renderer reproduces this exactly — structure JSON to match):
+CV360 ATS LAYOUT (Word renderer reproduces this exactly):
 
 HEADER (centred):
 - Line 1: candidate full name (large, bold).
-- Line 2: phone | email | linkedin | github — pipe-separated, no "https://", no location on this line.
+- Line 2: tailored professional tagline for the target role (bold, e.g. "Software Engineer and Machine Learning Specialist").
+- Line 3: phone   |   email   |   linkedin   |   github — spaced pipes, no https:// prefixes.
 
 SECTION ORDER (always use this order in the "sections" array):
-1. summary — title "Professional Summary"
-2. education — title "Education"
-3. experience — title "Work Experience"
-4. projects — title "Technical Projects"
-5. skills — title "Technical Skills" (always last)
+1. summary — title "PROFESSIONAL SUMMARY"
+2. skills — title "TECHNICAL SKILLS"
+3. soft_skills — title "SOFT SKILLS" (role-tailored interpersonal strengths)
+4. experience — title "PROFESSIONAL EXPERIENCE"
+5. projects — title "PROJECTS"
+6. certifications — title "CERTIFICATIONS & CONTINUOUS LEARNING" (omit section if none)
+7. education — title "EDUCATION" (always last)
 
-SECTION HEADERS: mixed-case title with a horizontal rule underneath (e.g. "Work Experience", not ALL CAPS).
+SECTION HEADERS: ALL CAPS, bold, no underline rule.
 
-PROFESSIONAL SUMMARY: one justified paragraph (3-4 sentences), no bullets.
+PROFESSIONAL SUMMARY: one paragraph (3-5 sentences), no bullets. Mention years of experience,
+core domain, and 2-3 keywords from the job description naturally.
 
-EDUCATION & WORK EXPERIENCE entries (each item):
-- Row 1: heading = institution or "Company (Client)" (bold) … date on the right (e.g. "Jan 2025" or "April 2022 - Aug 2023").
-- Row 2: subheading = degree or job title (italic) … location on the right (e.g. "Bath, UK").
-- Then 1-3 bullet lines prefixed with an en-dash in the rendered doc (store bullet text without the dash).
+TECHNICAL SKILLS: 3-5 groups. Each group is one line:
+  Category label (bold): comma-separated tools/technologies.
+  Categories examples: "Machine Learning & Deep Learning", "MLOps, Cloud & DevOps", "Software & Data Engineering".
+  Prioritise skills mentioned in the job description first.
 
-TECHNICAL PROJECTS entries (each item):
-- Row 1: heading = project name (bold) + "|" + tech stack (italic, comma-separated) … year on the right.
-- 2-4 impact bullets (store without leading dash).
-- links: array of {"label": "Source Code", "url": "..."} — labels like "Source Code", "Live Project", "Technical Report", joined with "|" in the footer line. Copy URLs only from ORIGINAL PROJECT LINKS.
+SOFT SKILLS (critical — tailor to the target role): 4-6 groups, same one-line format as technical skills.
+  Derive from the job description (e.g. leadership, communication, stakeholder management, adaptability).
+  Ground each line in REAL evidence from the source CV — never invent experience.
+  Examples:
+  - Leadership & Team Development: led shift teams, mentored new starters, …
+  - Communication: translated technical findings for non-technical stakeholders, …
+  - Organised & Methodical: managed SLAs, triaged high-volume tickets, …
 
-TECHNICAL SKILLS: groups with short bold category labels and comma-separated values, e.g.
-  AI/ML: PyTorch, TensorFlow, …
-  Cloud/DevOps: AWS, GCP, Docker, …
+PROFESSIONAL EXPERIENCE (reverse chronological):
+- Each entry: role and company combined as "Role — Company" (use em dash —).
+- Date range and location on the same line, right-aligned: "Jul 2024 – Present | Bath, UK".
+- 2-4 achievement bullets with metrics where possible. Store bullets WITHOUT a leading dash.
 
-DATE FORMAT: use plain hyphens in ranges (April 2022 - Aug 2023). Month abbreviations: Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec.
+PROJECTS:
+- Line 1: project name (bold).
+- Line 2: tech stack | year (e.g. "PyTorch, Flask | 2026").
+- 2-3 impact bullets.
+- links: [{"label": "Source code", "url": "..."}] — only from ORIGINAL PROJECT LINKS.
 
-Do NOT use tables, text boxes, or multi-column section layout. Single reading order top-to-bottom.
+CERTIFICATIONS: items with heading (cert/course name + provider), date, optional detail text.
+
+EDUCATION (reverse chronological):
+- Line 1: "Degree (grade if any), Institution" … date range on the right.
+- Line 2: location (city, country).
+- Optional "Relevant courses:" sentence listing modules aligned to the target role.
+
+DATE FORMAT: Month abbreviations (Jan, Feb, Mar, Apr, May, Jun, Jul, Aug, Sep, Oct, Nov, Dec).
+Use en dash – in displayed date ranges (Jul 2024 – Present).
+
+Do NOT use tables, text boxes, columns, or graphics. Plain text only for ATS parsing.
 """
 
 
 def _normalize_dates(text: str) -> str:
-    return (text or "").replace("—", "-").replace("–", "-")
+    return (text or "").replace("—", "–").replace("-", "–").replace("  ", " ")
 
 
 def _display_url(url: str) -> str:
@@ -106,66 +131,101 @@ def _set_run_font(run, size_pt: float = 10, bold: bool = False, italic: bool = F
     run.italic = italic
 
 
-def _add_bottom_border(paragraph) -> None:
-    p_pr = paragraph._p.get_or_add_pPr()
-    p_bdr = OxmlElement("w:pBdr")
-    bottom = OxmlElement("w:bottom")
-    bottom.set(qn("w:val"), "single")
-    bottom.set(qn("w:sz"), "4")
-    bottom.set(qn("w:space"), "1")
-    bottom.set(qn("w:color"), "000000")
-    p_bdr.append(bottom)
-    p_pr.append(p_bdr)
-
-
 def _configure_page(doc: Document) -> None:
     for section in doc.sections:
-        section.left_margin = Inches(0.55)
-        section.right_margin = Inches(0.55)
+        section.left_margin = Inches(0.6)
+        section.right_margin = Inches(0.6)
         section.top_margin = Inches(0.5)
         section.bottom_margin = Inches(0.5)
-
-
-def _add_two_column_line(
-    doc: Document,
-    left: str,
-    right: str = "",
-    left_bold: bool = False,
-    left_italic: bool = False,
-    right_italic: bool = True,
-    size_pt: float = 10,
-    space_after: float = 0,
-) -> None:
-    paragraph = doc.add_paragraph()
-    fmt = paragraph.paragraph_format
-    fmt.tab_stops.add_tab_stop(_RIGHT_TAB, WD_TAB_ALIGNMENT.RIGHT)
-    if space_after:
-        fmt.space_after = Pt(space_after)
-
-    left_run = paragraph.add_run(left or "")
-    _set_run_font(left_run, size_pt=size_pt, bold=left_bold, italic=left_italic)
-
-    if right:
-        paragraph.add_run("\t")
-        right_run = paragraph.add_run(right)
-        _set_run_font(right_run, size_pt=size_pt, italic=right_italic)
+    normal = doc.styles["Normal"]
+    normal.font.name = _FONT
+    normal.font.size = Pt(10)
 
 
 def _add_section_heading(doc: Document, title: str) -> None:
     paragraph = doc.add_paragraph()
-    paragraph.paragraph_format.space_before = Pt(7)
-    paragraph.paragraph_format.space_after = Pt(3)
-    run = paragraph.add_run(title)
-    _set_run_font(run, size_pt=12.5, bold=False)
-    _add_bottom_border(paragraph)
+    paragraph.paragraph_format.space_before = Pt(8)
+    paragraph.paragraph_format.space_after = Pt(4)
+    run = paragraph.add_run(title.upper())
+    _set_run_font(run, size_pt=12, bold=True)
 
 
-def _add_dash_bullet(doc: Document, text: str) -> None:
-    paragraph = doc.add_paragraph()
-    paragraph.paragraph_format.space_after = Pt(1)
+def _add_skill_line(doc: Document, label: str, value: str) -> None:
+    paragraph = doc.add_paragraph(style="List Paragraph")
+    paragraph.paragraph_format.space_after = Pt(2)
+    paragraph.paragraph_format.left_indent = Inches(0.05)
+    if label:
+        label_run = paragraph.add_run(f"{label}: ")
+        _set_run_font(label_run, bold=True)
+    if value:
+        value_run = paragraph.add_run(value)
+        _set_run_font(value_run)
+
+
+def _add_bullet(doc: Document, text: str) -> None:
+    paragraph = doc.add_paragraph(style="List Paragraph")
+    paragraph.paragraph_format.space_after = Pt(2)
     paragraph.paragraph_format.left_indent = Inches(0.15)
-    run = paragraph.add_run(f"–{text.strip()}")
+    run = paragraph.add_run(text.strip())
     _set_run_font(run, size_pt=10)
+
+
+def _add_experience_header(doc: Document, item: dict) -> None:
+    """Role — Company on the left; date | location tab-aligned on the right."""
+    role = (item.get("role") or "").strip()
+    company = (item.get("company") or "").strip()
+    heading = (item.get("heading") or "").strip()
+    subheading = (item.get("subheading") or "").strip()
+
+    if role and company:
+        left = f"{role} — {company}"
+    elif heading and subheading and "—" not in heading:
+        left = f"{subheading} — {heading}"
+    elif heading:
+        left = heading
+    else:
+        left = role or company or subheading
+
+    date = _normalize_dates(item.get("date") or "").strip()
+    location = (item.get("location") or "").strip()
+    right = f"{date} | {location}".strip(" |") if date or location else ""
+
+    paragraph = doc.add_paragraph()
+    paragraph.paragraph_format.tab_stops.add_tab_stop(_RIGHT_TAB, WD_TAB_ALIGNMENT.RIGHT)
+    paragraph.paragraph_format.space_after = Pt(2)
+    left_run = paragraph.add_run(left)
+    _set_run_font(left_run, bold=True)
+    if right:
+        paragraph.add_run("\t")
+        right_run = paragraph.add_run(right)
+        _set_run_font(right_run, size_pt=9)
+
+
+def _add_education_header(doc: Document, item: dict) -> None:
+    degree = (item.get("degree") or item.get("subheading") or "").strip()
+    school = (item.get("school") or item.get("heading") or "").strip()
+    if degree and school and degree not in school:
+        left = f"{degree}, {school}"
+    else:
+        left = school or degree
+
+    date = _normalize_dates(item.get("date") or "").strip()
+    paragraph = doc.add_paragraph()
+    paragraph.paragraph_format.tab_stops.add_tab_stop(_RIGHT_TAB, WD_TAB_ALIGNMENT.RIGHT)
+    paragraph.paragraph_format.space_after = Pt(1)
+    left_run = paragraph.add_run(left)
+    _set_run_font(left_run, bold=True)
+    if date:
+        paragraph.add_run("\t")
+        date_run = paragraph.add_run(date)
+        _set_run_font(date_run, size_pt=9)
+
+    location = (item.get("location") or "").strip()
+    if location:
+        loc_p = doc.add_paragraph(location)
+        loc_p.paragraph_format.space_after = Pt(2)
+        for run in loc_p.runs:
+            _set_run_font(run, size_pt=9)
 
 
 def _add_hyperlink(paragraph, text: str, url: str) -> None:
@@ -196,6 +256,16 @@ def _add_hyperlink(paragraph, text: str, url: str) -> None:
     paragraph._p.append(hyperlink)
 
 
+def _render_skill_groups(doc: Document, groups: list) -> None:
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        label = (group.get("label") or "").strip()
+        value = (group.get("value") or "").strip()
+        if label or value:
+            _add_skill_line(doc, label, value)
+
+
 def _plain_paragraphs_from_text(doc: Document, text: str) -> None:
     blocks = [b.strip() for b in re.split(r"\n\s*\n", text or "") if b.strip()]
     if not blocks and (text or "").strip():
@@ -207,7 +277,7 @@ def _plain_paragraphs_from_text(doc: Document, text: str) -> None:
 
 
 def render_resume_docx(data: dict, out_path: str) -> bool:
-    """Render structured resume JSON to Word — matches resume.html / profile CV layout."""
+    """Render structured resume JSON to Word — CV360 ATS layout."""
     try:
         doc = Document()
         _configure_page(doc)
@@ -217,7 +287,14 @@ def render_resume_docx(data: dict, out_path: str) -> bool:
             name_p = doc.add_paragraph()
             name_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             name_run = name_p.add_run(name)
-            _set_run_font(name_run, size_pt=22, bold=True)
+            _set_run_font(name_run, size_pt=20, bold=True)
+
+        tagline = (data.get("tagline") or "").strip()
+        if tagline:
+            tag_p = doc.add_paragraph()
+            tag_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            tag_run = tag_p.add_run(tagline)
+            _set_run_font(tag_run, size_pt=11, bold=True)
 
         contact = data.get("contact") or {}
         contact_bits: list[str] = []
@@ -230,18 +307,18 @@ def render_resume_docx(data: dict, out_path: str) -> bool:
             else:
                 contact_bits.append(raw)
         if contact_bits:
-            contact_p = doc.add_paragraph("|".join(contact_bits))
+            contact_p = doc.add_paragraph("   |   ".join(contact_bits))
             contact_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            contact_p.paragraph_format.space_after = Pt(4)
+            contact_p.paragraph_format.space_after = Pt(6)
             for run in contact_p.runs:
-                _set_run_font(run, size_pt=9.5)
+                _set_run_font(run, size_pt=9)
 
         for section in data.get("sections") or []:
             if not isinstance(section, dict):
                 continue
             section_type = section.get("type") or ""
             title = (section.get("title") or "").strip() or _DEFAULT_SECTION_TITLES.get(
-                section_type, section_type
+                section_type, section_type.upper()
             )
             _add_section_heading(doc, title)
 
@@ -249,58 +326,21 @@ def render_resume_docx(data: dict, out_path: str) -> bool:
                 text = (section.get("text") or "").strip()
                 if text:
                     summary_p = doc.add_paragraph(text)
-                    summary_p.paragraph_format.space_after = Pt(2)
+                    summary_p.paragraph_format.space_after = Pt(4)
                     for run in summary_p.runs:
                         _set_run_font(run)
 
-            elif section_type == "skills":
-                for group in section.get("groups") or []:
-                    if not isinstance(group, dict):
-                        continue
-                    label = (group.get("label") or "").strip()
-                    value = (group.get("value") or "").strip()
-                    if not label and not value:
-                        continue
-                    line_p = doc.add_paragraph()
-                    line_p.paragraph_format.space_after = Pt(1)
-                    if label:
-                        label_run = line_p.add_run(f"{label}: ")
-                        _set_run_font(label_run, bold=True)
-                    if value:
-                        value_run = line_p.add_run(value)
-                        _set_run_font(value_run)
+            elif section_type in ("skills", "soft_skills"):
+                _render_skill_groups(doc, section.get("groups") or [])
 
-            elif section_type in ("experience", "education"):
+            elif section_type == "experience":
                 for item in section.get("items") or []:
                     if not isinstance(item, dict):
                         continue
-                    heading = (item.get("heading") or "").strip()
-                    subheading = (item.get("subheading") or "").strip()
-                    location = (item.get("location") or "").strip()
-                    date = _normalize_dates(item.get("date") or "").strip()
-
-                    if heading or date:
-                        _add_two_column_line(
-                            doc,
-                            heading,
-                            date,
-                            left_bold=True,
-                            right_italic=True,
-                            space_after=0,
-                        )
-                    if subheading or location:
-                        _add_two_column_line(
-                            doc,
-                            subheading,
-                            location,
-                            left_italic=True,
-                            right_italic=True,
-                            size_pt=9.5,
-                            space_after=2,
-                        )
+                    _add_experience_header(doc, item)
                     for bullet in item.get("bullets") or []:
                         if bullet:
-                            _add_dash_bullet(doc, str(bullet))
+                            _add_bullet(doc, str(bullet))
 
             elif section_type == "projects":
                 for item in section.get("items") or []:
@@ -310,39 +350,61 @@ def render_resume_docx(data: dict, out_path: str) -> bool:
                     tech = (item.get("tech") or "").strip()
                     date = _normalize_dates(item.get("date") or "").strip()
 
-                    project_p = doc.add_paragraph()
-                    project_p.paragraph_format.tab_stops.add_tab_stop(
-                        _RIGHT_TAB, WD_TAB_ALIGNMENT.RIGHT
-                    )
-                    project_p.paragraph_format.space_after = Pt(1)
                     if project_name:
-                        name_run = project_p.add_run(project_name)
+                        name_p = doc.add_paragraph()
+                        name_p.paragraph_format.space_after = Pt(1)
+                        name_run = name_p.add_run(project_name)
                         _set_run_font(name_run, bold=True)
-                    if tech:
-                        tech_run = project_p.add_run(f"|{tech}")
-                        _set_run_font(tech_run, italic=True)
-                    if date:
-                        project_p.add_run("\t")
-                        date_run = project_p.add_run(date)
-                        _set_run_font(date_run, italic=True, size_pt=9.5)
+
+                    if tech or date:
+                        meta = " | ".join(x for x in (tech, date) if x)
+                        meta_p = doc.add_paragraph(meta)
+                        meta_p.paragraph_format.space_after = Pt(2)
+                        for run in meta_p.runs:
+                            _set_run_font(run, size_pt=9)
 
                     for bullet in item.get("bullets") or []:
                         if bullet:
-                            _add_dash_bullet(doc, str(bullet))
+                            _add_bullet(doc, str(bullet))
 
                     links = item.get("links") or []
                     if links:
                         links_p = doc.add_paragraph()
-                        links_p.paragraph_format.space_after = Pt(4)
+                        links_p.paragraph_format.space_after = Pt(6)
                         for idx, link in enumerate(links):
                             if not isinstance(link, dict):
                                 continue
                             label = (link.get("label") or "Link").strip()
                             url = (link.get("url") or "").strip()
                             if idx > 0:
-                                sep_run = links_p.add_run("|")
-                                _set_run_font(sep_run, size_pt=9.5)
+                                sep_run = links_p.add_run("   |   ")
+                                _set_run_font(sep_run, size_pt=9)
                             _add_hyperlink(links_p, label, url)
+
+            elif section_type == "certifications":
+                for item in section.get("items") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    heading = (item.get("heading") or "").strip()
+                    detail = (item.get("detail") or item.get("text") or "").strip()
+                    if heading:
+                        _add_bullet(doc, heading if not detail else f"{heading} — {detail}")
+                    elif detail:
+                        _add_bullet(doc, detail)
+
+            elif section_type == "education":
+                for item in section.get("items") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    _add_education_header(doc, item)
+                    courses = (item.get("courses") or item.get("detail") or "").strip()
+                    if courses:
+                        if not courses.lower().startswith("relevant"):
+                            courses = f"Relevant courses: {courses}"
+                        courses_p = doc.add_paragraph(courses)
+                        courses_p.paragraph_format.space_after = Pt(4)
+                        for run in courses_p.runs:
+                            _set_run_font(run, size_pt=9.5)
 
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         doc.save(out_path)

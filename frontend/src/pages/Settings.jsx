@@ -159,16 +159,17 @@ export default function Settings() {
   return (
     <div>
       <h2 className="page-title">Settings</h2>
-      <p className="page-subtitle">Your sending identity and API keys. Manage automation on the Automation page.</p>
+      <p className="page-subtitle">Your sending identity and API keys.</p>
 
       {message && <div className={`alert alert-${message.type}`}>{message.text}</div>}
 
       <div className="card">
-        <h3 style={{ marginBottom: '1rem' }}>Sending identity (SMTP)</h3>
+        <h3 style={{ marginBottom: '1rem' }}>Sending identity (SMTP) <span className="badge badge-discovered">Coming soon</span></h3>
         <p className="muted" style={{ marginBottom: '1rem' }}>
-          Outreach and test emails are sent from your own mailbox ({form.smtp_user || 'your account email'}).
-          The SMTP username must match your login email. For Gmail, use an App Password.
+          Email outreach is not available yet — we&apos;re building a better contact-finding flow.
+          SMTP settings will be used when outreach launches. For now, apply manually on each job site from Applications.
         </p>
+        <fieldset disabled style={{ opacity: 0.65, border: 'none', padding: 0, margin: 0 }}>
         <div className="form-group">
           <label>SMTP Host</label>
           <input value={form.smtp_host} onChange={(e) => set('smtp_host', e.target.value)} placeholder="smtp.gmail.com" />
@@ -194,6 +195,7 @@ export default function Settings() {
             placeholder={settings.smtp_password_set ? '••••••••' : 'app password'}
           />
         </div>
+        </fieldset>
       </div>
 
       <div className="card" style={{ marginTop: '1.5rem' }}>

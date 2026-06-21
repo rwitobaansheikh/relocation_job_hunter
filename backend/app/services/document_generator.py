@@ -29,7 +29,15 @@ from app.services.job_analyzer import JobAnalyzer
 
 logger = logging.getLogger(__name__)
 
-_SECTION_ORDER = ["summary", "education", "experience", "projects", "skills"]
+_SECTION_ORDER = [
+    "summary",
+    "skills",
+    "soft_skills",
+    "experience",
+    "projects",
+    "certifications",
+    "education",
+]
 _ALLOWED_SECTION_TYPES = set(_SECTION_ORDER)
 
 
@@ -107,8 +115,11 @@ def _resume_word_count(data: dict) -> int:
                     chunks.append(str(item[key]))
             chunks.extend(str(b) for b in (item.get("bullets") or []))
         for group in section.get("groups") or []:
-            if isinstance(group, dict) and group.get("value"):
-                chunks.append(str(group["value"]))
+            if isinstance(group, dict):
+                if group.get("value"):
+                    chunks.append(str(group["value"]))
+                if group.get("label"):
+                    chunks.append(str(group["label"]))
     words = [w for w in " ".join(chunks).split() if any(ch.isalnum() for ch in w)]
     return len(words)
 
@@ -289,11 +300,17 @@ class DocumentGenerator:
         data = apply_original_links_to_resume(data, get_project_links_for_profile(profile))
 
         # Keep only section types the template knows how to render.
-        data["sections"] = [
-            s
-            for s in (data.get("sections") or [])
-            if isinstance(s, dict) and s.get("type") in _ALLOWED_SECTION_TYPES
-        ]
+        cleaned_sections = []
+        for s in data.get("sections") or []:
+            if not isinstance(s, dict) or s.get("type") not in _ALLOWED_SECTION_TYPES:
+                continue
+            st = s.get("type")
+            if st == "certifications" and not (s.get("items") or []):
+                continue
+            if st == "soft_skills" and not (s.get("groups") or []):
+                continue
+            cleaned_sections.append(s)
+        data["sections"] = cleaned_sections
         return data
 
     async def _generate_cv_data(
@@ -307,52 +324,65 @@ class DocumentGenerator:
 
         schema = """{
   "name": "Full Name",
+  "tagline": "Role-aligned headline e.g. Software Engineer and Machine Learning Specialist",
   "contact": {"phone": "", "email": "", "linkedin": "", "github": "", "location": ""},
   "sections": [
-    {"type": "summary", "title": "Professional Summary", "text": "3-4 sentence tailored summary"},
-    {"type": "education", "title": "Education", "items": [
-      {"heading": "University of Bath", "location": "Bath, UK", "subheading": "MSc in Machine Learning (Merit)", "date": "Jan 2025", "bullets": ["optional detail with en-dash style content"]}
+    {"type": "summary", "title": "PROFESSIONAL SUMMARY", "text": "3-5 sentence tailored summary"},
+    {"type": "skills", "title": "TECHNICAL SKILLS", "groups": [
+      {"label": "Machine Learning & Deep Learning", "value": "PyTorch, TensorFlow, CNNs"},
+      {"label": "MLOps, Cloud & DevOps", "value": "AWS, GCP, Docker, Terraform"}
     ]},
-    {"type": "experience", "title": "Work Experience", "items": [
-      {"heading": "Tata Consultancy Services (Client: Equifax USA)", "location": "Mumbai, India", "subheading": "Data Engineer", "date": "April 2022 - Aug 2023", "bullets": ["achievement with metrics"]}
+    {"type": "soft_skills", "title": "SOFT SKILLS", "groups": [
+      {"label": "Leadership & Team Development", "value": "evidence-backed phrase from source CV"},
+      {"label": "Communication", "value": "evidence-backed phrase tailored to the role"}
     ]},
-    {"type": "projects", "title": "Technical Projects", "items": [
-      {"heading": "Project Name (context)", "tech": "PyTorch, Python, Flask", "date": "2024", "bullets": ["impact bullet"], "links": [{"label": "Source Code", "url": "https://..."}, {"label": "Live Project", "url": "https://..."}]}
+    {"type": "experience", "title": "PROFESSIONAL EXPERIENCE", "items": [
+      {"role": "Data Engineer", "company": "TCS (client: Equifax USA)", "location": "Mumbai, India", "date": "Apr 2022 – Aug 2023", "bullets": ["achievement with metrics"]}
     ]},
-    {"type": "skills", "title": "Technical Skills", "groups": [
-      {"label": "AI/ML", "value": "PyTorch, TensorFlow, Deep Learning"},
-      {"label": "Cloud/DevOps", "value": "AWS, GCP, Docker, Terraform"}
+    {"type": "projects", "title": "PROJECTS", "items": [
+      {"heading": "Project Name", "tech": "PyTorch, Python, Flask", "date": "2026", "bullets": ["impact bullet"], "links": [{"label": "Source code", "url": "https://..."}]}
+    ]},
+    {"type": "certifications", "title": "CERTIFICATIONS & CONTINUOUS LEARNING", "items": [
+      {"heading": "Course or cert name, Provider", "detail": "status and year. One-line description."}
+    ]},
+    {"type": "education", "title": "EDUCATION", "items": [
+      {"degree": "MSc Machine Learning and Autonomous Systems (Merit)", "school": "University of Bath", "location": "Bath, UK", "date": "Oct 2023 – Jan 2025", "courses": "deep learning, statistics, Bayesian ML"}
     ]}
   ]
 }"""
 
         layout_spec = cv_layout_prompt_reference()
 
-        prompt = f"""You are an expert CV writer. Rewrite the source CV into an ATS-friendly version tailored to the target role.
-The output will be rendered to Microsoft Word using a fixed LaTeX-style template — follow the layout spec exactly.
+        prompt = f"""You are an expert CV writer producing CV360-approved ATS-friendly CVs.
+Rewrite the source CV for the target role. Output strict JSON only — no markdown fences.
 
 TARGET ROLE: {job.title}
-JOB DESCRIPTION (use for keyword matching):
+JOB DESCRIPTION (extract keywords, soft skills, and technical requirements):
 {(job.description or '')[:3000]}
 
-Tailoring means re-emphasising, reordering, and rewording REAL content from the original CV. Never invent employers, dates, tools, or results.
+Tailoring = re-emphasise, reorder, and reword REAL content from the source CV.
+Never invent employers, dates, degrees, tools, certifications, or metrics.
 
-Return ONLY a single JSON object matching this schema (no markdown fences, no commentary):
+Return ONLY a JSON object matching this schema:
 {schema}
 
 {layout_spec}
 
 CONTENT RULES:
-1. Maximum 2 A4 pages (700-800 words). Cut least-relevant bullets/projects instead of padding.
-2. UK English spelling (optimise, organise, specialise, programme for courses).
-3. Tailor summary, skills order, and bullet emphasis to the target role and job description keywords.
-4. Experience in strict reverse chronological order (most recent first).
-5. Pick 2-4 bullets per job and 2-3 most relevant projects; angle wording toward the target role.
-6. Use plain hyphens in date ranges (April 2022 - Aug 2023), not em/en dashes in the date field.
-7. Avoid AI clichés: leverage, robust, seamless, cutting-edge, dynamic, passionate, results-driven, synergy.
-8. Vary bullet verbs; expand acronyms on first use; describe code in plain English.
-9. No square-bracket placeholders. Bullet strings must NOT include a leading dash (the renderer adds it).
-10. Project links: copy ONLY from ORIGINAL PROJECT LINKS below — never invent URLs.
+1. Maximum 2 A4 pages (~700-800 words). Drop least-relevant content instead of padding.
+2. UK English spelling (optimise, organise, specialise).
+3. tagline: concise role headline tailored to {job.title} (not generic "passionate professional").
+4. TECHNICAL SKILLS: reorder categories and tools to mirror the job description. Job-required skills first.
+5. SOFT SKILLS (required): 4-6 lines tailored to the role's interpersonal/leadership needs.
+   Read the job description for cues (stakeholder management, cross-functional work, mentoring, etc.).
+   Each line must reflect REAL experience from the source CV — paraphrase evidence, do not fabricate.
+6. Experience: reverse chronological. 2-4 metric-driven bullets per role. Use role + company fields.
+7. Projects: 2-3 most relevant; angle bullets toward the target role.
+8. Certifications: include courses/certs from the source CV; omit the section if none exist.
+9. Education: reverse chronological; add "Relevant courses" aligned to the target role.
+10. Avoid AI clichés: leverage, robust, seamless, cutting-edge, dynamic, passionate, synergy.
+11. Bullets must NOT start with a dash, bullet character, or number.
+12. Project links: copy ONLY from ORIGINAL PROJECT LINKS — never invent URLs.
 
 ORIGINAL PROJECT LINKS (copy exactly):
 {links_prompt or "(none found — omit links arrays)"}
@@ -360,11 +390,11 @@ ORIGINAL PROJECT LINKS (copy exactly):
 SOURCE CV:
 {cv_text[:6000]}
 
-CANDIDATE CONTACT (populate contact object — phone and email required when known):
+CANDIDATE CONTACT:
 - Name: {profile.full_name}
 - Email: {profile.email} | Phone: {profile.phone} | LinkedIn: {profile.linkedin_url}
 - Skills: {profile.skills}
-- Open to relocation to: {profile.target_countries}
+- Open to relocation: {profile.target_countries}
 
 IMPROVEMENT SUGGESTIONS (address truthfully): {gaps_text}
 """
@@ -372,9 +402,9 @@ IMPROVEMENT SUGGESTIONS (address truthfully): {gaps_text}
         result = await llm_generate(
             prompt,
             system=(
-                "You are an expert CV writer producing strict JSON for a LaTeX-style Word CV template. "
-                "Match the reference layout: centred name/contact, ruled section headers, "
-                "two-column entry rows (org left/date right), en-dash bullets, skills at end."
+                "You are an expert CV writer producing strict JSON for a CV360 ATS Word template. "
+                "Layout: centred name, bold tagline, spaced contact line, ALL CAPS section headers, "
+                "technical skills then soft skills (role-tailored), experience, projects, certifications, education."
             ),
             temperature=0.4,
             max_tokens=4096,

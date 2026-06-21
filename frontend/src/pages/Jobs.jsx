@@ -270,7 +270,7 @@ export default function Jobs() {
     <div>
       <h2 className="page-title">Search Jobs</h2>
       <p className="page-subtitle">
-        Set your filters and search for matching roles.
+        Set your filters and search for matching roles — results save to Applications automatically.
       </p>
 
       <div className="card" style={{ marginBottom: '2rem' }}>
@@ -375,7 +375,7 @@ export default function Jobs() {
                 onClick={handleAddJob}
                 disabled={addingJob}
                 title="Add Job"
-                help="Saves this job to your Applications list so you can tailor documents and send outreach."
+                help="Saves this job to your Applications list so you can tailor documents and apply on the job site."
               >
                 {addingJob ? 'Adding…' : 'Add Job'}
               </HelpButton>

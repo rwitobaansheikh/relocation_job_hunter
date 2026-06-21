@@ -78,7 +78,9 @@ function ProtectedLayout() {
           <NavLink to="/app/profile" onClick={closeNav}>Profile & Uploads</NavLink>
           <NavLink to="/app/jobs" onClick={closeNav}>Search Jobs</NavLink>
           <NavLink to="/app/applications" onClick={closeNav}>Applications</NavLink>
-          <NavLink to="/app/automation" onClick={closeNav}>Automation</NavLink>
+          <NavLink to="/app/automation" onClick={closeNav}>
+            Automation <span className="nav-soon">Soon</span>
+          </NavLink>
           <NavLink to="/app/billing" onClick={closeNav}>Plan & Billing</NavLink>
           <NavLink to="/app/settings" onClick={closeNav}>Settings</NavLink>
           <NavLink to="/app/feedback" onClick={closeNav}>Feedback</NavLink>

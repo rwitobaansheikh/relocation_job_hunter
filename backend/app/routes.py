@@ -66,7 +66,7 @@ from app.schemas import (
     UserResponse,
 )
 from app.security import encrypt_secret, hash_password, verify_password
-from app.services.account import delete_account
+from app.services.account import delete_account, delete_application
 from app.services.document_generator import DocumentGenerator
 from app.services.cv_link_extractor import build_project_link_map, serialize_project_links
 from app.services.document_parser import extract_text_from_file
@@ -593,6 +593,19 @@ def delete_all_applications(
         ).delete(synchronize_session=False)
         db.commit()
     return {"deleted": len(app_ids)}
+
+
+@router.delete("/applications/{application_id}")
+def delete_application_by_id(
+    application_id: int,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    """Remove a single job application and its generated documents."""
+    app = _owned_application(db, application_id, profile)
+    delete_application(db, app)
+    db.commit()
+    return {"deleted": application_id}
 
 
 @router.get("/applications/{application_id}", response_model=JobApplicationResponse)

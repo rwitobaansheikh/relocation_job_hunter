@@ -34,7 +34,7 @@ export default function PlanGate({ children }) {
 
   useEffect(() => {
     if (isExpired && onRestrictedPage) {
-      setUpgradeMessage('Your free trial has ended. Choose a plan to unlock tailoring, outreach, and automation.')
+      setUpgradeMessage('Your free trial has ended. Choose a plan to unlock job search, document tailoring, and application tracking.')
       setUpgradeOpen(true)
     }
   }, [isExpired, onRestrictedPage])

@@ -43,6 +43,19 @@ def _delete_generated_dir(application_id: int) -> None:
         shutil.rmtree(out_dir, ignore_errors=True)
 
 
+def delete_application(db: Session, app: JobApplication) -> None:
+    """Remove one application, its outreach emails, and generated files."""
+    _delete_generated_dir(app.id)
+    _unlink(app.tailored_cv_path)
+    _unlink(app.tailored_cover_letter_path)
+    db.query(OutreachEmail).filter(
+        OutreachEmail.application_id == app.id
+    ).delete(synchronize_session=False)
+    db.query(JobApplication).filter(JobApplication.id == app.id).delete(
+        synchronize_session=False
+    )
+
+
 def delete_account(db: Session, user: User) -> None:
     """Cancel any subscription and erase every trace of `user`."""
     # 1) Unsubscribe from billing (best-effort; never blocks deletion).

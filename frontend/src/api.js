@@ -149,6 +149,8 @@ export const api = {
     return res.blob()
   },
   deleteAllApplications: () => request('/applications', { method: 'DELETE' }),
+  deleteApplication: (applicationId) =>
+    request(`/applications/${applicationId}`, { method: 'DELETE' }),
   tailorDocuments: (applicationIds) =>
     request('/applications/tailor', { method: 'POST', body: JSON.stringify({ application_ids: applicationIds }) }),
   tailorSingle: (applicationId) =>

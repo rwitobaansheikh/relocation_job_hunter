@@ -284,6 +284,20 @@ label {
   box-shadow: var(--shadow-sm);
 }
 
+.nav-soon {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 4px;
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  vertical-align: middle;
+}
+
 .main {
   flex: 1;
   padding: 2.5rem;
@@ -502,6 +516,17 @@ label {
   flex-wrap: wrap;
 }
 
+.application-card__primary--apply {
+  align-items: center;
+  padding-top: 0.25rem;
+}
+
+.tailored-docs-panel__apply {
+  border-top: 1px dashed var(--border);
+  padding-top: 0.75rem;
+  margin-top: 0.5rem;
+}
+
 .application-card__more {
   border-top: 1px dashed var(--border);
   padding-top: 0.75rem;
@@ -524,6 +549,15 @@ label {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.application-card__manage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  border-top: 1px dashed var(--border);
+  padding-top: 0.75rem;
   margin-top: 0.75rem;
 }
 
@@ -1403,14 +1437,22 @@ label {
   margin-bottom: 1rem;
 }
 
+.cv-preview__tagline {
+  text-align: center;
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
 .cv-preview__heading {
   font-size: 0.78rem;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--accent);
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 0.25rem;
+  color: var(--text);
+  border-bottom: none;
+  padding-bottom: 0.15rem;
   margin-bottom: 0.5rem;
+  font-weight: 800;
 }
 
 .cv-preview__text {

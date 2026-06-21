@@ -23,7 +23,7 @@ const DASHBOARD_STEPS = [
   {
     step: 3,
     title: 'Tailor & apply',
-    body: 'Tailor documents for a role, review your CV and cover letter, then send outreach.',
+    body: 'Tailor documents for a role, review your CV and cover letter, then apply on the job site.',
     to: '/app/applications',
     linkLabel: 'Go to Applications →',
   },
@@ -103,7 +103,7 @@ export default function Dashboard() {
               style={{ width: '100%' }}
               onClick={() => navigate('/app/applications')}
               title="View Applications"
-              help="See every job you've saved, tailor documents, preview emails, and send outreach from one place."
+              help="See every job you've saved, tailor documents, preview and download them, and apply on each job site."
             >
               View Applications
             </HelpButton>
@@ -131,11 +131,10 @@ export default function Dashboard() {
 
       {billing && (
         <div className="card" style={{ marginTop: '1.5rem' }}>
-          <h3 style={{ marginBottom: '0.8rem' }}>Plan & Automation</h3>
+          <h3 style={{ marginBottom: '0.8rem' }}>Plan & usage</h3>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.6rem' }}>
             <span className="badge badge-applied" style={{ textTransform: 'capitalize' }}>{billing.plan}</span>
             {billing.plan === 'trial' && <span className="muted">{billing.trial_days_left} day(s) of trial left</span>}
-            <Link to="/app/automation" style={{ fontSize: '0.85rem' }}>Manage loops →</Link>
             <Link to="/app/billing" style={{ fontSize: '0.85rem' }}>Plan & Billing →</Link>
           </div>
           {billing.stripe_configured && !billing.has_stripe_subscription && billing.plan !== 'unlimited' && (
@@ -151,8 +150,7 @@ export default function Dashboard() {
             </div>
           )}
           <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-            {billing.usage.loops_active} / {billing.limits.max_loops} automation loops active ·
-            {' '}{billing.usage.manual_today} / {billing.limits.manual_per_day} manual applications today
+            {billing.usage.manual_today} / {billing.limits.manual_per_day} applications tailored today
           </p>
         </div>
       )}

@@ -5,28 +5,28 @@ import { ContactSection, ReviewsSection } from '../components/Feedback'
 
 const FEATURES = [
   {
-    title: 'Bulk application pipeline',
-    body: 'Search hundreds of roles, tailor CVs in batch, preview documents, and send outreach to multiple jobs from one table view.',
+    title: 'All-in-one job search',
+    body: 'Search LinkedIn, RemoteOK, Remotive, We Work Remotely and more from a single dashboard — filtered by your CV and target roles.',
   },
   {
-    title: 'Smart job discovery',
-    body: 'Scans LinkedIn, RemoteOK, Remotive, We Work Remotely and more for fresh roles that match your CV, target roles and locations.',
+    title: 'AI-tailored CVs & cover letters',
+    body: 'Every job gets a CV360-style ATS CV and cover letter rewritten for the role — preview, edit, and download as Word docs.',
+  },
+  {
+    title: 'Bulk document tailoring',
+    body: 'Tailor documents for dozens of discovered jobs in one click, then apply manually on each job site at your own pace.',
   },
   {
     title: 'AI role suggestions',
     body: 'Upload your CV and get tailored job-title suggestions — use them as-is or combine with your own target roles.',
   },
   {
-    title: 'AI-tailored CVs & cover letters',
-    body: 'Every application gets a one-page CV and cover letter rewritten for the job description — preview, edit, and download as ATS-friendly Word docs.',
+    title: 'Match scoring & analysis',
+    body: 'See how well each role fits your background before you spend time tailoring and applying.',
   },
   {
-    title: 'Verified contact finding',
-    body: 'Finds HR and hiring contacts at each company, prioritising real people over generic inboxes.',
-  },
-  {
-    title: 'Hands-free automation',
-    body: 'Set up loops per job role and let the platform search, tailor, and send on a schedule — with strict daily caps and rate limiting.',
+    title: 'Application tracking',
+    body: 'Track every job from discovered → tailored → applied → interview in one pipeline view.',
   },
 ]
 
@@ -56,11 +56,12 @@ export default function Landing() {
       </nav>
 
       <header className="landing-hero">
-        <div className="landing-hero__badge">3-day free trial · Bulk apply ready</div>
-        <h1>Apply to more jobs in less time</h1>
+        <div className="landing-hero__badge">3-day free trial · Search · Tailor · Apply</div>
+        <h1>Find jobs. Tailor your CV. Apply faster.</h1>
         <p>
-          Job Application Flow is your AI copilot for bulk job search — discover roles, tailor CVs and cover letters
-          per job, preview everything before you send, and reach hiring teams at scale.
+          Job Application Flow brings job search and AI document tailoring into one workspace —
+          discover roles across major boards, generate a tailored CV and cover letter for each one,
+          then apply directly on the job site.
         </p>
         <div className="landing-cta">
           <button className="btn-primary" onClick={() => navigate('/register')}>Start free trial</button>
@@ -69,7 +70,7 @@ export default function Landing() {
       </header>
 
       <h2 className="section-heading">Everything you need to run an aggressive job search</h2>
-      <p className="section-sub">One workspace from discovery to outreach to follow-up.</p>
+      <p className="section-sub">One workspace from job search to tailored documents to manual apply.</p>
       <div className="feature-grid">
         {FEATURES.map((f) => (
           <div key={f.title} className="card">
@@ -81,10 +82,10 @@ export default function Landing() {
 
       <h2 className="section-heading">How it works</h2>
       <div className="feature-grid">
-        <div className="card"><h3>1. Upload your CV</h3><p>Upload your CV and cover letter — we'll suggest job roles based on your experience, or you can enter your own.</p></div>
-        <div className="card"><h3>2. Connect your mailbox</h3><p>Add your SMTP sending identity in Settings so outreach goes out from your own email address.</p></div>
-        <div className="card"><h3>3. Search & tailor</h3><p>Run a search and let the AI tailor documents and draft outreach for the best-matched roles.</p></div>
-        <div className="card"><h3>4. Turn on automation</h3><p>Set up automation loops per role — the platform keeps searching, tailoring and sending within your plan limits.</p></div>
+        <div className="card"><h3>1. Upload your CV</h3><p>Upload your CV — we suggest job roles from your experience, or enter your own target titles and locations.</p></div>
+        <div className="card"><h3>2. Search jobs</h3><p>Run a search across multiple job boards. Every match is saved to your Applications pipeline automatically.</p></div>
+        <div className="card"><h3>3. Tailor documents</h3><p>The AI generates a CV360-style ATS CV and cover letter tailored to each job description.</p></div>
+        <div className="card"><h3>4. Apply on the job site</h3><p>Download your documents, open the listing, and submit your application — track status as you go.</p></div>
       </div>
 
       <div style={{ textAlign: 'center', marginTop: '3rem' }}>

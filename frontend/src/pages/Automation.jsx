@@ -7,19 +7,21 @@ const AUTOMATION_STEPS = [
   {
     step: 1,
     title: 'Pick one role & location',
-    body: 'Each loop targets a single job title and one country or city — e.g. "Machine Learning Engineer" in Netherlands.',
+    body: 'Each loop will target a single job title and one country or city — e.g. "Machine Learning Engineer" in Netherlands.',
   },
   {
     step: 2,
     title: 'Set your schedule',
-    body: 'Choose how often the loop runs and how many applications it sends per day (within your plan limits).',
+    body: 'Choose how often the loop runs and how many jobs to search and tailor per day.',
   },
   {
     step: 3,
     title: 'Enable the loop',
-    body: 'Turn it on and the app will search, tailor documents, and send outreach automatically.',
+    body: 'Turn it on and the app will search and tailor documents automatically — apply on job sites when ready.',
   },
 ]
+
+const AUTOMATION_COMING_SOON = true
 
 const SENIORITY_OPTIONS = [
   { value: 'intern', label: 'Internship' },
@@ -240,10 +242,19 @@ export default function Automation() {
     <div>
       <h2 className="page-title">Automation</h2>
       <p className="page-subtitle">
-        Each loop searches one role in one location, tailors documents, and sends applications on a schedule.
+        Scheduled job search and document tailoring — email outreach and auto-apply coming later.
       </p>
 
-      {loops.length === 0 && editing !== 'new' && (
+      {AUTOMATION_COMING_SOON && (
+        <div className="alert alert-info" style={{ marginBottom: '1.5rem' }}>
+          <strong>Coming soon.</strong> For now, use{' '}
+          <a href="/app/jobs">Search Jobs</a> and{' '}
+          <a href="/app/applications">Applications</a> to find roles, tailor your CV and cover letter,
+          and apply manually on each job site.
+        </div>
+      )}
+
+      {loops.length === 0 && editing !== 'new' && !AUTOMATION_COMING_SOON && (
         <OnboardingGuide
           storageKey="jh_onboarding_automation"
           title="Setting up your first automation loop"
@@ -259,7 +270,9 @@ export default function Automation() {
           <span style={{ textTransform: 'capitalize' }}>{billing?.plan}</span> plan
           {autoCap ? ` · up to ${autoCap} auto applies/loop/day` : ''}
         </div>
-        {!canAutomate ? (
+        {AUTOMATION_COMING_SOON ? (
+          <span className="muted" style={{ fontSize: '0.9rem' }}>New loops — coming soon</span>
+        ) : !canAutomate ? (
           <a className="btn-primary" href="/app/billing">Upgrade to enable automation</a>
         ) : (
           <HelpButton
@@ -280,7 +293,7 @@ export default function Automation() {
         </div>
       )}
 
-      {editing === 'new' && (
+      {editing === 'new' && !AUTOMATION_COMING_SOON && (
         <LoopForm initial={emptyLoop()} autoCap={autoCap} saving={saving} onCancel={() => setEditing(null)} onSave={saveNew} />
       )}
 

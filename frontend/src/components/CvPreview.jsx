@@ -1,9 +1,24 @@
 const SECTION_TITLES = {
-  summary: 'Summary',
-  education: 'Education',
-  experience: 'Experience',
+  summary: 'Professional Summary',
+  skills: 'Technical Skills',
+  soft_skills: 'Soft Skills',
+  experience: 'Professional Experience',
   projects: 'Projects',
-  skills: 'Skills',
+  certifications: 'Certifications',
+  education: 'Education',
+}
+
+function experienceLine(item) {
+  if (item.role && item.company) return `${item.role} — ${item.company}`
+  if (item.heading && item.subheading) return `${item.subheading} — ${item.heading}`
+  return item.heading || item.role || item.company || item.subheading || ''
+}
+
+function educationLine(item) {
+  const degree = item.degree || item.subheading || ''
+  const school = item.school || item.heading || ''
+  if (degree && school && !school.includes(degree)) return `${degree}, ${school}`
+  return school || degree
 }
 
 export default function CvPreview({ data }) {
@@ -22,6 +37,7 @@ export default function CvPreview({ data }) {
   return (
     <div className="cv-preview">
       {data.name && <div className="cv-preview__name">{data.name}</div>}
+      {data.tagline && <div className="cv-preview__tagline">{data.tagline}</div>}
       {contactBits.length > 0 && (
         <div className="cv-preview__contact">{contactBits.join(' · ')}</div>
       )}
@@ -38,26 +54,23 @@ export default function CvPreview({ data }) {
               <p className="cv-preview__text">{section.text}</p>
             )}
 
-            {type === 'skills' && (section.groups || []).map((group, gi) => (
+            {(type === 'skills' || type === 'soft_skills') && (section.groups || []).map((group, gi) => (
               <p key={gi} className="cv-preview__text">
                 {group.label && <strong>{group.label}: </strong>}
                 {group.value}
               </p>
             ))}
 
-            {(type === 'experience' || type === 'education') && (section.items || []).map((item, ii) => (
+            {type === 'experience' && (section.items || []).map((item, ii) => (
               <div key={ii} className="cv-preview__item">
                 <div className="cv-preview__item-head">
-                  <strong>{item.heading}</strong>
-                  {item.date && <span className="cv-preview__date">{item.date}</span>}
+                  <strong>{experienceLine(item)}</strong>
+                  {(item.date || item.location) && (
+                    <span className="cv-preview__date">
+                      {[item.date, item.location].filter(Boolean).join(' | ')}
+                    </span>
+                  )}
                 </div>
-                {(item.subheading || item.location) && (
-                  <div className="cv-preview__sub">
-                    {item.subheading}
-                    {item.subheading && item.location ? ' · ' : ''}
-                    {item.location}
-                  </div>
-                )}
                 {(item.bullets || []).map((bullet, bi) => (
                   <div key={bi} className="cv-preview__bullet">• {bullet}</div>
                 ))}
@@ -67,10 +80,37 @@ export default function CvPreview({ data }) {
             {type === 'projects' && (section.items || []).map((item, ii) => (
               <div key={ii} className="cv-preview__item">
                 <strong>{item.heading || item.name}</strong>
-                {item.text && <p className="cv-preview__text">{item.text}</p>}
+                {(item.tech || item.date) && (
+                  <div className="cv-preview__sub">
+                    {[item.tech, item.date].filter(Boolean).join(' | ')}
+                  </div>
+                )}
                 {(item.bullets || []).map((bullet, bi) => (
                   <div key={bi} className="cv-preview__bullet">• {bullet}</div>
                 ))}
+              </div>
+            ))}
+
+            {type === 'certifications' && (section.items || []).map((item, ii) => (
+              <div key={ii} className="cv-preview__bullet">
+                • {item.heading}{item.detail ? ` — ${item.detail}` : ''}
+              </div>
+            ))}
+
+            {type === 'education' && (section.items || []).map((item, ii) => (
+              <div key={ii} className="cv-preview__item">
+                <div className="cv-preview__item-head">
+                  <strong>{educationLine(item)}</strong>
+                  {item.date && <span className="cv-preview__date">{item.date}</span>}
+                </div>
+                {item.location && <div className="cv-preview__sub">{item.location}</div>}
+                {item.courses && (
+                  <p className="cv-preview__text">
+                    {item.courses.toLowerCase().startsWith('relevant')
+                      ? item.courses
+                      : `Relevant courses: ${item.courses}`}
+                  </p>
+                )}
               </div>
             ))}
           </section>

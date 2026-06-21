@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import CvPreview from './CvPreview'
 
-export default function TailoredDocuments({ applicationId, open, onClose }) {
+import ApplyOnSiteButton from './ApplyOnSiteButton'
+
+export default function TailoredDocuments({ applicationId, open, onClose, jobUrl, onApply }) {
   const [meta, setMeta] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -66,7 +68,7 @@ export default function TailoredDocuments({ applicationId, open, onClose }) {
         <div>
           <h4>Tailored application package</h4>
           <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
-            Review your AI-generated CV and cover letter before sending outreach.
+            Download your tailored documents, then apply on the job site with them.
           </p>
         </div>
         <button type="button" className="btn-secondary btn-sm" onClick={onClose}>
@@ -165,6 +167,15 @@ export default function TailoredDocuments({ applicationId, open, onClose }) {
                   {meta.cover_letter_text || 'No cover letter text yet.'}
                 </div>
               )}
+            </div>
+          )}
+
+          {jobUrl && onApply && (
+            <div className="tailored-docs-panel__apply">
+              <p className="muted" style={{ margin: '0.75rem 0 0.5rem', fontSize: '0.85rem' }}>
+                Ready to submit? Open the job listing, upload your CV and cover letter, and complete the application.
+              </p>
+              <ApplyOnSiteButton jobUrl={jobUrl} onApply={onApply} className="btn-primary btn-sm" />
             </div>
           )}
         </>
