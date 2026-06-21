@@ -16,6 +16,11 @@ from app.services.smtp_email_verifier import (
     normalize_name,
     smtp_port25_available,
 )
+from app.services.company_domain_resolver import (
+    clean_domain,
+    is_job_board_host,
+    slug_domain_guess,
+)
 from app.services.website_email_scraper import WebsiteEmailScraper
 
 logger = logging.getLogger(__name__)
@@ -427,9 +432,9 @@ class EmailFinder:
 
     @staticmethod
     def _normalize_domain(domain: str, company: str) -> str:
-        if domain and "." in domain:
-            return domain.lower().strip().lstrip("www.")
+        cleaned = clean_domain(domain)
+        if cleaned and not is_job_board_host(cleaned):
+            return cleaned
         if company:
-            clean = re.sub(r"[^a-z0-9]", "", company.lower())
-            return f"{clean}.com" if clean else ""
+            return slug_domain_guess(company)
         return ""

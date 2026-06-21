@@ -76,7 +76,7 @@ export const api = {
       body: JSON.stringify({ max_jobs: 100, ...payload }),
     }),
 
-  streamSearchJobs: async (payload, onEvent) => {
+  streamSearchJobs: async (payload, onEvent, options = {}) => {
     const headers = { 'Content-Type': 'application/json' }
     const token = getToken()
     if (token) headers['Authorization'] = `Bearer ${token}`
@@ -85,6 +85,7 @@ export const api = {
       method: 'POST',
       headers,
       body: JSON.stringify({ max_jobs: 100, ...payload }),
+      signal: options.signal,
     })
 
     if (!response.ok) {
@@ -98,25 +99,41 @@ export const api = {
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
 
-    while (true) {
-      const { value, done } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      
-      const lines = buffer.split('\n\n')
-      buffer = lines.pop() // keep incomplete chunk
-      
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6))
-            onEvent(data)
-          } catch (e) {
-            console.error('Failed to parse SSE JSON:', line)
+    try {
+      while (true) {
+        if (options.signal?.aborted) {
+          await reader.cancel()
+          break
+        }
+
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        const lines = buffer.split('\n\n')
+        buffer = lines.pop()
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              onEvent(data)
+              if (data.type === 'cancelled' || data.type === 'done') {
+                return data
+              }
+            } catch (e) {
+              console.error('Failed to parse SSE JSON:', line)
+            }
           }
         }
       }
+    } catch (err) {
+      if (options.signal?.aborted || err.name === 'AbortError') {
+        return { type: 'cancelled' }
+      }
+      throw err
     }
+    return null
   },
 
   importJob: (url) =>
@@ -175,6 +192,11 @@ export const api = {
   getDashboardStats: () => request('/dashboard/stats'),
   getOutreachEmails: (applicationId) => request(`/applications/${applicationId}/emails`),
   getContacts: (applicationId) => request(`/applications/${applicationId}/contacts`),
+  updateCompanyDomain: (applicationId, companyDomain) =>
+    request(`/applications/${applicationId}/company-domain`, {
+      method: 'PATCH',
+      body: JSON.stringify({ company_domain: companyDomain }),
+    }),
   getAutomationRuns: () => request('/automation/runs'),
 
   // --- Automation loops ---

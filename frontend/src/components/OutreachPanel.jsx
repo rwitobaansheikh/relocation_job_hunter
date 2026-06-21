@@ -13,13 +13,28 @@ function verificationLabel(status, catchAll) {
   return 'Unknown'
 }
 
-export default function OutreachPanel({ applicationId, open, companyDomain, onSent }) {
+export default function OutreachPanel({
+  applicationId,
+  open,
+  companyName,
+  companyDomain,
+  onSent,
+  onDomainUpdated,
+}) {
   const [contacts, setContacts] = useState(null)
+  const [resolvedDomain, setResolvedDomain] = useState(companyDomain || '')
+  const [domainInput, setDomainInput] = useState(companyDomain || '')
+  const [domainWasJobBoard, setDomainWasJobBoard] = useState(false)
   const [emails, setEmails] = useState(null)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(null)
   const [error, setError] = useState(null)
   const [info, setInfo] = useState(null)
+
+  useEffect(() => {
+    setResolvedDomain(companyDomain || '')
+    setDomainInput(companyDomain || '')
+  }, [companyDomain])
 
   const loadHistory = async () => {
     try {
@@ -35,20 +50,50 @@ export default function OutreachPanel({ applicationId, open, companyDomain, onSe
     setContacts(null)
     setError(null)
     setInfo(null)
+    setDomainWasJobBoard(false)
     loadHistory()
   }, [open, applicationId])
+
+  const saveDomain = async () => {
+    const trimmed = domainInput.trim()
+    if (!trimmed) return
+    setBusy('domain')
+    setError(null)
+    try {
+      const result = await api.updateCompanyDomain(applicationId, trimmed)
+      setResolvedDomain(result.company_domain)
+      setDomainInput(result.company_domain)
+      if (onDomainUpdated) onDomainUpdated(result.company_domain)
+      setInfo(`Employer domain set to ${result.company_domain}. Click Find contacts to search again.`)
+    } catch (err) {
+      setError(err.message)
+    }
+    setBusy(null)
+  }
 
   const findContacts = async () => {
     setLoading(true)
     setError(null)
-    setInfo('Searching for recruiters and verifying emails via SMTP — this can take a minute…')
+    setInfo('Resolving employer domain and searching for recruiter emails — this can take a minute…')
     try {
-      const found = await api.getContacts(applicationId)
-      setContacts(found)
-      if (found.length === 0) {
-        setInfo('No contacts found. Add a company domain on the job or try a manual job import.')
+      const result = await api.getContacts(applicationId)
+      setContacts(result.contacts)
+      if (result.resolved_domain) {
+        setResolvedDomain(result.resolved_domain)
+        setDomainInput(result.resolved_domain)
+        if (onDomainUpdated) onDomainUpdated(result.resolved_domain)
+      }
+      setDomainWasJobBoard(result.domain_was_job_board)
+
+      if (result.contacts.length === 0) {
+        const label = result.resolved_domain || companyName || 'this company'
+        setInfo(
+          result.domain_was_job_board
+            ? `Previously used a job-board domain. Now searching ${label} — still no public emails found. Try correcting the domain below.`
+            : `No public recruiter emails found for ${label}. Many companies only use contact forms — try correcting the domain or reaching out on LinkedIn.`,
+        )
       } else {
-        setInfo(`Found ${found.length} contact(s).`)
+        setInfo(`Found ${result.contacts.length} contact(s) for ${result.resolved_domain || companyName}.`)
       }
     } catch (err) {
       setError(err.message)
@@ -80,15 +125,49 @@ export default function OutreachPanel({ applicationId, open, companyDomain, onSe
 
   if (!open) return null
 
+  const displayCompany = companyName || 'this company'
+  const displayDomain = resolvedDomain || companyDomain
+
   return (
     <div className="outreach-panel">
       <div className="outreach-panel__header">
         <div>
           <h4>Email outreach</h4>
           <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
-            Find recruiter emails for {companyDomain ? `${companyDomain}` : 'this company'} and send your tailored CV & cover letter.
+            Find recruiter emails for <strong>{displayCompany}</strong>
+            {displayDomain ? ` (${displayDomain})` : ''} and send your tailored CV & cover letter.
           </p>
         </div>
+      </div>
+
+      <div className="outreach-panel__domain" style={{ marginBottom: '0.75rem' }}>
+        <label className="outreach-panel__label" htmlFor={`domain-${applicationId}`}>
+          Employer domain
+        </label>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <input
+            id={`domain-${applicationId}`}
+            type="text"
+            placeholder="company.com"
+            value={domainInput}
+            onChange={(e) => setDomainInput(e.target.value)}
+            style={{ flex: '1 1 12rem', minWidth: '10rem' }}
+          />
+          <HelpButton
+            className="btn-secondary btn-sm"
+            disabled={busy === 'domain' || !domainInput.trim()}
+            onClick={saveDomain}
+            title="Save domain"
+            help="Use the hiring company's website domain (e.g. fever.com), not the job board where you found the listing."
+          >
+            {busy === 'domain' ? 'Saving…' : 'Save domain'}
+          </HelpButton>
+        </div>
+        {domainWasJobBoard && (
+          <p className="muted" style={{ fontSize: '0.8rem', margin: '0.35rem 0 0' }}>
+            The job listing URL pointed at a job board — we resolved the employer domain automatically.
+          </p>
+        )}
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -100,7 +179,7 @@ export default function OutreachPanel({ applicationId, open, companyDomain, onSe
           disabled={loading || busy}
           onClick={findContacts}
           title="Find contacts"
-          help="Searches LinkedIn for HR/recruiters, verifies email patterns against the company mail server, and checks generic inboxes like careers@ and jobs@."
+          help="Resolves the employer domain, scans careers/contact pages, searches public listings, and optionally verifies email patterns."
         >
           {loading ? 'Finding contacts…' : contacts ? 'Refresh contacts' : 'Find contacts'}
         </HelpButton>
@@ -132,7 +211,7 @@ export default function OutreachPanel({ applicationId, open, companyDomain, onSe
           title="Send outreach"
           help="Sends outreach from your login email with your tailored CV and cover letter attached. Configure your mailbox in Settings."
         >
-          {busy === 'send' ? 'Sending…' : 'Send outreach'}
+          {busy === 'send' ? 'Sending outreach…' : 'Send outreach'}
         </HelpButton>
       </div>
 
@@ -160,8 +239,9 @@ export default function OutreachPanel({ applicationId, open, companyDomain, onSe
 
       {contacts && contacts.length === 0 && !loading && (
         <p className="muted">
-          No contacts found yet. Add the company domain on the job (e.g. company.com), then try again —
-          we scan their careers/contact pages and public listings for real addresses.
+          No public emails found for {displayDomain || displayCompany}. Confirm the employer domain above
+          (not the job board), then refresh — we scan careers pages and public listings. Many companies
+          only accept applications via their site or ATS.
         </p>
       )}
 

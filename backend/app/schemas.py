@@ -436,6 +436,17 @@ class ContactResponse(BaseModel):
     catch_all: bool = False
 
 
+class ContactsLookupResponse(BaseModel):
+    contacts: list[ContactResponse]
+    resolved_domain: str = ""
+    company: str = ""
+    domain_was_job_board: bool = False
+
+
+class UpdateCompanyDomainRequest(BaseModel):
+    company_domain: str = Field(min_length=3, max_length=253)
+
+
 class OutreachEmailResponse(BaseModel):
     id: int
     application_id: int

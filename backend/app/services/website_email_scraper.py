@@ -159,16 +159,27 @@ class WebsiteEmailScraper:
             # Priority paths first — stop early once we have useful hits.
             priority_paths = ("", "/careers", "/jobs", "/contact", "/about")
             other_paths = tuple(p for p in CAREER_PATHS if p not in priority_paths)
+            career_hosts = (
+                domain,
+                f"www.{domain}",
+                f"careers.{domain}",
+                f"jobs.{domain}",
+            )
 
-            for path_group in (priority_paths, other_paths):
-                for path in path_group:
+            for host in career_hosts:
+                if len(results) >= limit:
+                    break
+                for path_group in (priority_paths, other_paths):
+                    for path in path_group:
+                        if len(results) >= limit:
+                            break
+                        added = await self._scrape_path(client, host, path, seen)
+                        results.extend(added)
+                        if len(results) >= 2 and path in ("/careers", "/jobs", "/contact"):
+                            break
                     if len(results) >= limit:
                         break
-                    added = await self._scrape_path(client, domain, path, seen)
-                    results.extend(added)
-                    if len(results) >= 2 and path in ("/careers", "/jobs", "/contact"):
-                        break
-                if len(results) >= limit:
+                if len(results) >= 2:
                     break
 
             if len(results) < limit:
@@ -186,44 +197,42 @@ class WebsiteEmailScraper:
     async def _scrape_path(
         self,
         client: httpx.AsyncClient,
-        domain: str,
+        host: str,
         path: str,
         seen: set[str],
     ) -> list[ScrapedEmail]:
+        domain = _clean_domain(host.split("/")[0])
         found: list[ScrapedEmail] = []
-        for prefix in (f"https://{domain}", f"https://www.{domain}"):
-            url = f"{prefix}{path}"
-            try:
-                res = await client.get(url)
-                if res.status_code >= 400:
-                    continue
-                emails = _extract_emails(res.text, domain)
-                soup = BeautifulSoup(res.text, "html.parser")
-                for tag in soup.select("a[href^=mailto:]"):
-                    href = tag.get("href", "")
-                    mail = href.split("mailto:", 1)[-1].split("?", 1)[0].strip().lower()
-                    if mail.endswith(f"@{domain}"):
-                        emails.add(mail)
+        url = f"https://{host}{path}"
+        try:
+            res = await client.get(url)
+            if res.status_code >= 400:
+                return found
+            emails = _extract_emails(res.text, domain)
+            soup = BeautifulSoup(res.text, "html.parser")
+            for tag in soup.select("a[href^=mailto:]"):
+                href = tag.get("href", "")
+                mail = href.split("mailto:", 1)[-1].split("?", 1)[0].strip().lower()
+                if mail.endswith(f"@{domain}"):
+                    emails.add(mail)
 
-                for email in emails:
-                    if email in seen:
-                        continue
-                    seen.add(email)
-                    local = email.split("@")[0]
-                    name, title = _name_from_local(local)
-                    found.append(
-                        ScrapedEmail(
-                            email=email,
-                            name=name,
-                            title=title,
-                            source=f"website:{path or '/'}",
-                            confidence=_page_confidence(path, local),
-                        )
+            for email in emails:
+                if email in seen:
+                    continue
+                seen.add(email)
+                local = email.split("@")[0]
+                name, title = _name_from_local(local)
+                found.append(
+                    ScrapedEmail(
+                        email=email,
+                        name=name,
+                        title=title,
+                        source=f"website:{path or '/'}",
+                        confidence=_page_confidence(path, local),
                     )
-                if found:
-                    return found
-            except Exception as exc:
-                logger.debug("Website scrape failed for %s: %s", url, exc)
+                )
+        except Exception as exc:
+            logger.debug("Website scrape failed for %s: %s", url, exc)
         return found
 
     async def _search_snippets(
@@ -233,6 +242,8 @@ class WebsiteEmailScraper:
         queries = [
             f'site:{domain} "@{domain}"',
             f'"{company}" recruiter "@{domain}"',
+            f'site:{domain} (careers OR jobs OR recruiting OR talent) email',
+            f'"{company}" careers email "@{domain}"',
         ]
         found: list[ScrapedEmail] = []
         seen: set[str] = set()

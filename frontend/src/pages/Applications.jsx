@@ -267,9 +267,19 @@ export default function Applications() {
       />
       <OutreachPanel
         applicationId={app.id}
+        companyName={app.job?.company}
         companyDomain={app.job?.company_domain}
         open={expandedOutreach === app.id}
         onSent={loadApps}
+        onDomainUpdated={(domain) => {
+          setApplications((prev) =>
+            prev.map((a) =>
+              a.id === app.id && a.job
+                ? { ...a, job: { ...a.job, company_domain: domain } }
+                : a,
+            ),
+          )
+        }}
       />
       {expandedDesc === app.id && (
         <div className="application-card__panel">

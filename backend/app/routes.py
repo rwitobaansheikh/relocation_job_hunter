@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
@@ -5,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import aiofiles
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session, joinedload
 
@@ -36,6 +37,7 @@ from app.schemas import (
     ChangePasswordRequest,
     ContactCreate,
     ContactResponse,
+    ContactsLookupResponse,
     CoverLetterUpdateRequest,
     DeleteAccountRequest,
     FollowUpRequest,
@@ -59,6 +61,7 @@ from app.schemas import (
     SettingsResponse,
     SettingsUpdate,
     TailorDocumentsRequest,
+    UpdateCompanyDomainRequest,
     TailoredDocumentsResponse,
     TokenResponse,
     UserProfileResponse,
@@ -406,6 +409,7 @@ def update_settings(
 @router.post("/jobs/search")
 async def search_jobs(
     request: JobSearchRequest,
+    http_request: Request,
     user: User = Depends(require_active_plan),
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
@@ -424,16 +428,30 @@ async def search_jobs(
         roles=[r.strip() for r in request.roles if r and r.strip()],
         work_types=[wt for wt in request.work_types if wt in WORK_TYPES],
     )
-    
-    # We use an async generator to stream jobs back to the client as they are processed
+
+    async def is_cancelled() -> bool:
+        return await http_request.is_disconnected()
+
     async def event_stream():
+        last_stats = {"jobs_found": 0, "jobs_stored": 0, "jobs_filtered": 0}
         try:
-            async for event in service.search_jobs_stream(db, profile.id, request.max_jobs, filters):
+            async for event in service.search_jobs_stream(
+                db, profile.id, request.max_jobs, filters, is_cancelled=is_cancelled
+            ):
+                if event.get("stats"):
+                    last_stats = event["stats"]
+                if await is_cancelled():
+                    yield f"data: {json.dumps({'type': 'cancelled', 'stats': last_stats, 'message': 'Search stopped.'})}\n\n"
+                    break
                 yield f"data: {json.dumps(event)}\n\n"
+                if event.get("type") in ("done", "cancelled"):
+                    break
+        except asyncio.CancelledError:
+            yield f"data: {json.dumps({'type': 'cancelled', 'stats': last_stats, 'message': 'Search stopped.'})}\n\n"
         except Exception as e:
             logger.error(f"Search stream error: {e}", exc_info=True)
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
-            
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e), 'stats': last_stats})}\n\n"
+
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
@@ -907,24 +925,31 @@ def get_outreach_emails(
     return db.query(OutreachEmail).filter(OutreachEmail.application_id == application_id).all()
 
 
-@router.get("/applications/{application_id}/contacts", response_model=list[ContactResponse])
+@router.get("/applications/{application_id}/contacts", response_model=ContactsLookupResponse)
 async def find_application_contacts(
     application_id: int,
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
     """Look up outreach contacts via website scrape, search, and optional SMTP verify."""
+    from app.services.company_domain_resolver import clean_domain, is_job_board_host, resolve_employer_domain
+
     app = _owned_application(db, application_id, profile, with_job=True)
     if not app.job:
         raise HTTPException(status_code=400, detail="Application has no associated job")
 
-    domain = (app.job.company_domain or "").strip()
-    if not domain and app.job.url:
-        from urllib.parse import urlparse
+    stored = clean_domain(app.job.company_domain or "")
+    domain_was_job_board = bool(stored and is_job_board_host(stored))
 
-        host = urlparse(app.job.url).netloc.lower().removeprefix("www.")
-        if host and "." in host and "linkedin.com" not in host and "indeed.com" not in host:
-            domain = host
+    domain = await resolve_employer_domain(
+        company=app.job.company,
+        company_domain=app.job.company_domain or "",
+        job_url=app.job.url or "",
+    )
+
+    if domain and app.job.company_domain != domain:
+        app.job.company_domain = domain
+        db.commit()
 
     finder = EmailFinder()
     contacts = await finder.find_contacts(
@@ -933,18 +958,51 @@ async def find_application_contacts(
         job_title=app.job.title,
         limit=settings.max_emails_per_company,
     )
-    return [
-        ContactResponse(
-            name=c.name,
-            email=c.email,
-            title=c.title,
-            confidence=c.confidence,
-            pattern=c.pattern,
-            verification_status=c.verification_status,
-            catch_all=c.catch_all,
+    return ContactsLookupResponse(
+        contacts=[
+            ContactResponse(
+                name=c.name,
+                email=c.email,
+                title=c.title,
+                confidence=c.confidence,
+                pattern=c.pattern,
+                verification_status=c.verification_status,
+                catch_all=c.catch_all,
+            )
+            for c in contacts
+        ],
+        resolved_domain=domain,
+        company=app.job.company or "",
+        domain_was_job_board=domain_was_job_board,
+    )
+
+
+@router.patch("/applications/{application_id}/company-domain")
+def update_application_company_domain(
+    application_id: int,
+    request: UpdateCompanyDomainRequest,
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    """Override the employer domain used for email outreach on this job."""
+    from app.services.company_domain_resolver import clean_domain, is_job_board_host
+
+    app = _owned_application(db, application_id, profile, with_job=True)
+    if not app.job:
+        raise HTTPException(status_code=400, detail="Application has no associated job")
+
+    domain = clean_domain(request.company_domain)
+    if not domain or "." not in domain:
+        raise HTTPException(status_code=400, detail="Enter a valid domain like company.com")
+    if is_job_board_host(domain):
+        raise HTTPException(
+            status_code=400,
+            detail="That looks like a job board, not the employer. Use the hiring company's domain.",
         )
-        for c in contacts
-    ]
+
+    app.job.company_domain = domain
+    db.commit()
+    return {"company_domain": domain}
 
 
 @router.post("/applications/follow-up")

@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
 
+from app.services.company_domain_resolver import is_job_board_host, registrable_domain
 from app.services.scraper.base import parse_salary
 
 logger = logging.getLogger(__name__)
@@ -24,33 +25,7 @@ _USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
-# Hosts that are job boards/aggregators rather than the employer itself, so we
-# don't mistake them for the company's email domain.
-_JOB_BOARD_HOSTS = {
-    "linkedin.com", "indeed.com", "glassdoor.com", "ziprecruiter.com",
-    "monster.com", "lever.co", "greenhouse.io", "myworkdayjobs.com",
-    "workable.com", "ashbyhq.com", "smartrecruiters.com", "totaljobs.com",
-    "reed.co.uk", "otta.com", "wellfound.com", "angel.co", "remoteok.com",
-    "remoteok.io", "weworkremotely.com", "remotive.com", "relocate.me",
-    "google.com", "bing.com", "jobs.lever.co", "boards.greenhouse.io",
-}
-
 _CORE_FIELDS = ("title", "company", "description")
-
-
-def _registrable_domain(host: str) -> str:
-    host = (host or "").lower().split(":")[0]
-    if host.startswith("www."):
-        host = host[4:]
-    parts = host.split(".")
-    if len(parts) >= 2:
-        return ".".join(parts[-2:])
-    return host
-
-
-def _is_job_board(host: str) -> bool:
-    host = (host or "").lower()
-    return any(host == b or host.endswith("." + b) for b in _JOB_BOARD_HOSTS)
 
 
 def _clean_text(html_or_text: str) -> str:
@@ -112,10 +87,10 @@ def _org_domain(org: Any, page_host: str) -> str:
             val = org.get(key)
             if isinstance(val, str) and val.startswith("http"):
                 host = urlparse(val).netloc
-                if host and not _is_job_board(host):
-                    return _registrable_domain(host)
-    if page_host and not _is_job_board(page_host):
-        return _registrable_domain(page_host)
+                if host and not is_job_board_host(host):
+                    return registrable_domain(host)
+    if page_host and not is_job_board_host(page_host):
+        return registrable_domain(page_host)
     return ""
 
 
@@ -239,8 +214,8 @@ async def import_job_from_url(url: str) -> dict:
         result["company"] = _meta(soup, "og:site_name")
     if not result["description"]:
         result["description"] = _clean_text(_meta(soup, "og:description", "description"))
-    if not result["company_domain"] and page_host and not _is_job_board(page_host):
-        result["company_domain"] = _registrable_domain(page_host)
+    if not result["company_domain"] and page_host and not is_job_board_host(page_host):
+        result["company_domain"] = registrable_domain(page_host)
 
     # Best-effort salary from the description text if JSON-LD didn't carry it.
     if not result["salary_text"]:

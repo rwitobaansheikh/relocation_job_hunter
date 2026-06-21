@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional
@@ -28,6 +29,8 @@ from app.services.scraper.remoteok import RemoteOKScraper
 from app.services.scraper.weworkremotely import WeWorkRemotelyScraper
 
 logger = logging.getLogger(__name__)
+
+IsCancelled = Callable[[], Awaitable[bool]]
 
 
 @dataclass
@@ -104,7 +107,11 @@ class JobSearchService:
         user_profile_id: int,
         max_jobs: int = 100,
         filters: Optional[SearchFilters] = None,
+        is_cancelled: IsCancelled | None = None,
     ):
+        async def cancelled() -> bool:
+            return is_cancelled is not None and await is_cancelled()
+
         profile = db.query(UserProfile).filter(UserProfile.id == user_profile_id).first()
         if not profile:
             raise ValueError(f"User profile {user_profile_id} not found")
@@ -118,7 +125,7 @@ class JobSearchService:
             roles = [r.strip() for r in filters.roles if r.strip()]
         else:
             roles = [r.strip() for r in (profile.target_roles or "").split(",") if r.strip()]
-            
+
         if filters.location:
             locations = [filters.location.strip()]
         else:
@@ -130,12 +137,20 @@ class JobSearchService:
 
         existing_external_ids = self._existing_external_ids(db, user_profile_id)
 
-        yield {"type": "status", "message": f"Starting search for {linkedin_geo[0]}..."}
-
         stats = {
             "jobs_found": 0,
             "jobs_stored": 0,
             "jobs_filtered": 0,
+        }
+
+        role_preview = ", ".join(roles[:3]) + ("…" if len(roles) > 3 else "")
+        loc_label = linkedin_geo[0] or "your profile locations"
+        yield {
+            "type": "progress",
+            "message": f"Starting search for {role_preview or 'your target roles'} in {loc_label}…",
+            "location": linkedin_geo[0],
+            "roles": roles,
+            "stats": stats,
         }
 
         linkedin_scraper = next((s for s in self.scrapers if isinstance(s, LinkedInScraper)), None)
@@ -143,7 +158,7 @@ class JobSearchService:
             yield {"type": "done", "stats": stats}
             return
 
-        async for job in linkedin_scraper.fetch_jobs_stream(
+        async for item in linkedin_scraper.fetch_jobs_stream(
             roles=roles,
             location=linkedin_geo[0],
             age_hours=age_hours,
@@ -151,7 +166,17 @@ class JobSearchService:
             salary_bucket=salary_to_fe_bucket(filters.min_salary),
             work_type_codes=filters.linkedin_work_type_codes(),
             exclude_external_ids=existing_external_ids,
+            is_cancelled=is_cancelled,
         ):
+            if await cancelled():
+                yield {"type": "cancelled", "stats": stats, "message": "Search stopped."}
+                return
+
+            if isinstance(item, dict):
+                yield {**item, "stats": stats}
+                continue
+
+            job = item
             smin, smax, currency, salary_label = parse_salary(" ".join([job.title, job.description]))
             job.salary_min, job.salary_max = smin, smax
             job.salary_currency, job.salary_text = currency, salary_label
@@ -223,18 +248,22 @@ class JobSearchService:
 
             db.commit()
 
+            if stats["jobs_stored"] >= max_jobs:
+                yield {"type": "done", "stats": stats, "message": "Reached the maximum jobs for this search."}
+                return
+
             yield {
                 "type": "job",
                 "job": {
                     "title": job.title,
                     "company": job.company,
                     "location": job.location,
-                    "url": job.url
+                    "url": job.url,
                 },
-                "stats": stats
+                "stats": stats,
             }
 
-        yield {"type": "done", "stats": stats}
+        yield {"type": "done", "stats": stats, "message": "Search complete."}
 
     @staticmethod
     def _existing_external_ids(db: Session, user_profile_id: int) -> set[str]:

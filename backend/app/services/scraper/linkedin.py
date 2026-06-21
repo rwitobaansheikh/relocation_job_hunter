@@ -3,8 +3,9 @@
 import asyncio
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Union
 
 import httpx
 from bs4 import BeautifulSoup
@@ -16,6 +17,9 @@ from app.services.scraper.linkedin_query import (
 )
 
 logger = logging.getLogger(__name__)
+
+IsCancelled = Callable[[], Awaitable[bool]]
+StreamItem = Union[RawJob, dict]
 
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -61,25 +65,42 @@ class LinkedInScraper:
         salary_bucket: Optional[str] = None,
         work_type_codes: Optional[list[str]] = None,
         exclude_external_ids: Optional[set[str]] = None,
+        is_cancelled: IsCancelled | None = None,
     ):
         role_terms = [r for r in (roles or []) if r][: self.MAX_ROLES] or [""]
         location_term = location.strip()
         exclude = exclude_external_ids or set()
-        
+
+        async def cancelled() -> bool:
+            return is_cancelled is not None and await is_cancelled()
+
         def is_new(job_id: str) -> bool:
             return f"linkedin-{job_id}" not in exclude
 
-        fetch_cap = 500  # High limit to prevent infinite loops
+        fetch_cap = 500
         cards: dict[str, dict] = {}
-        
+
         async with httpx.AsyncClient(
             timeout=30.0, follow_redirects=True, headers={"User-Agent": _USER_AGENT}
         ) as client:
             for role in role_terms:
                 page = 0
                 while True:
+                    if await cancelled():
+                        return
                     if len(cards) >= fetch_cap:
                         break
+
+                    role_label = role or "all roles"
+                    loc_label = location_term or "worldwide"
+                    yield {
+                        "type": "progress",
+                        "message": f'Searching LinkedIn for "{role_label}" in {loc_label}, page {page + 1}…',
+                        "role": role,
+                        "location": location_term,
+                        "page": page + 1,
+                    }
+
                     start = page * self.PAGE_SIZE
                     found = await self._search(
                         client,
@@ -93,19 +114,29 @@ class LinkedInScraper:
                     )
                     if not found:
                         break
-                        
+
                     found_new_this_page = False
                     for card in found:
+                        if await cancelled():
+                            return
                         if len(cards) >= fetch_cap:
                             break
                         job_id = card.get("job_id")
                         if job_id and job_id not in cards:
                             card["search_location"] = location_term
                             cards[job_id] = card
-                            
+
                             if is_new(job_id):
                                 found_new_this_page = True
+                                yield {
+                                    "type": "progress",
+                                    "message": f'Loading details: {card["title"]} at {card["company"]}…',
+                                    "role": role,
+                                    "location": location_term,
+                                }
                                 await asyncio.sleep(0.35)
+                                if await cancelled():
+                                    return
                                 card["description"] = await self._fetch_description(client, job_id)
                                 yield RawJob(
                                     external_id=f"linkedin-{job_id}",
@@ -121,61 +152,10 @@ class LinkedInScraper:
 
                     await asyncio.sleep(2.5)
                     page += 1
-                    
+
                     if not found_new_this_page and page > 3:
                         break
-            await asyncio.sleep(1.0)
-        role_terms = [r for r in (roles or []) if r][: self.MAX_ROLES] or [""]
-        location_terms = [loc for loc in (locations or []) if loc][: self.MAX_LOCATIONS]
-        if not location_terms:
-            location_terms = [""]
-
-        exclude = exclude_external_ids or set()
-        global_limit = compute_fetch_limit(requested=limit, locations=location_terms)
-        # Paginate deeper on repeat searches when many results are already saved.
-        fetch_cap = 500  # A high absolute limit to prevent truly infinite loops
-        target_new = fetch_cap
-
-        def is_new(job_id: str) -> bool:
-            return f"linkedin-{job_id}" not in exclude
-
-        cards: dict[str, dict] = {}
-        async with httpx.AsyncClient(
-            timeout=30.0, follow_redirects=True, headers={"User-Agent": _USER_AGENT}
-        ) as client:
-            for location in location_terms:
-                for role in role_terms:
-                    page = 0
-                    while True:
-                        if len(cards) >= fetch_cap:
-                            break
-                        start = page * self.PAGE_SIZE
-                        found = await self._search(
-                            client,
-                            keywords=role,
-                            location=location,
-                            age_hours=age_hours,
-                            start=start,
-                            experience_codes=experience_codes,
-                            salary_bucket=salary_bucket,
-                            work_type_codes=work_type_codes,
-                        )
-                        if not found:
-                            break
-                        for card in found:
-                            if len(cards) >= fetch_cap:
-                                break
-                            if card["job_id"] and card["job_id"] not in cards:
-                                card["search_location"] = location
-                                cards[card["job_id"]] = card
-                        
-                        # "if a delay is required for accurately searching jobs so be it"
-                        await asyncio.sleep(2.5)
-                        page += 1
-                await asyncio.sleep(2.0)
-
-            new_cards = [card for card in cards.values() if is_new(card["job_id"])]
-            selected = new_cards[:target_new]
+                await asyncio.sleep(1.0)
 
 
     async def _search(

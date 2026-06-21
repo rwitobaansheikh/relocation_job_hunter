@@ -1609,3 +1609,82 @@ label {
   gap: 0.35rem;
   flex-wrap: wrap;
 }
+
+.job-search-progress {
+  margin-bottom: 1.5rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+}
+
+.job-search-progress__header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.job-search-progress__headline {
+  flex: 1 1 12rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.job-search-progress__elapsed {
+  font-size: 0.85rem;
+}
+
+.job-search-progress__spinner {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: job-search-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes job-search-spin {
+  to { transform: rotate(360deg); }
+}
+
+.job-search-progress__message {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.job-search-progress__meta {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  margin-bottom: 0.75rem;
+}
+
+.job-search-progress__stats {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  font-size: 0.95rem;
+  margin-bottom: 0.75rem;
+}
+
+.job-search-progress__recent-label {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.job-search-progress__recent ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.88rem;
+}
+
+.job-search-progress__recent li {
+  margin-bottom: 0.25rem;
+}
