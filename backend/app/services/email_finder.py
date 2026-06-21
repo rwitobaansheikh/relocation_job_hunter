@@ -1,4 +1,4 @@
-"""Find hiring manager and company outreach emails via OSINT + SMTP verification."""
+"""Find hiring manager and company outreach emails via website scrape, search, and SMTP."""
 
 import logging
 import re
@@ -14,7 +14,9 @@ from app.services.smtp_email_verifier import (
     find_generic_emails,
     generate_patterns,
     normalize_name,
+    smtp_port25_available,
 )
+from app.services.website_email_scraper import WebsiteEmailScraper
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,17 @@ class Contact:
 class EmailFinder:
     rocketreach_base = "https://api.rocketreach.co/api/v2"
 
+    def __init__(self) -> None:
+        self._website = WebsiteEmailScraper()
+        self._smtp_available: bool | None = None
+
+    def _can_smtp_verify(self) -> bool:
+        if not settings.smtp_verify_enabled:
+            return False
+        if self._smtp_available is None:
+            self._smtp_available = smtp_port25_available()
+        return self._smtp_available
+
     async def find_contacts(self, company: str, domain: str, job_title: str, limit: int = 5) -> list[Contact]:
         domain = self._normalize_domain(domain, company)
         if not domain:
@@ -41,31 +54,45 @@ class EmailFinder:
         contacts: list[Contact] = []
         seen_emails: set[str] = set()
 
-        if settings.rocketreach_api_key:
-            for contact in await self._search_rocketreach(company, domain, limit):
-                if contact.email and contact.email.lower() not in seen_emails:
-                    seen_emails.add(contact.email.lower())
-                    contacts.append(contact)
+        scraped = await self._website.find_emails(company, domain, limit=limit * 2)
+        for item in scraped:
+            key = item.email.lower()
+            if key in seen_emails:
+                continue
+            seen_emails.add(key)
+            contacts.append(
+                Contact(
+                    name=item.name,
+                    email=item.email,
+                    title=item.title,
+                    confidence=item.confidence,
+                    pattern=item.email.split("@")[0],
+                    verification_status=item.verification_status,
+                )
+            )
 
-        if len(contacts) < limit:
-            for contact in await self._search_osint_verified(company, domain, job_title, limit - len(contacts)):
+        if settings.rocketreach_api_key and len(contacts) < limit:
+            for contact in await self._search_rocketreach(company, domain, limit - len(contacts)):
                 key = contact.email.lower()
                 if contact.email and key not in seen_emails:
                     seen_emails.add(key)
                     contacts.append(contact)
 
+        scraped_set = {c.email.lower() for c in contacts}
+
         if len(contacts) < limit:
+            for contact in await self._search_osint_verified(
+                company, domain, job_title, scraped_set, limit - len(contacts)
+            ):
+                key = contact.email.lower()
+                if contact.email and key not in seen_emails:
+                    seen_emails.add(key)
+                    contacts.append(contact)
+
+        if len(contacts) < limit and self._can_smtp_verify():
             for contact in await self._find_generic_verified(domain, limit - len(contacts)):
                 key = contact.email.lower()
                 if contact.email and key not in seen_emails:
-                    seen_emails.add(key)
-                    contacts.append(contact)
-
-        if not contacts:
-            logger.info("No verified contacts for %s — using unverified generic fallbacks", domain)
-            for contact in self._fallback_contacts(company, domain, limit):
-                key = contact.email.lower()
-                if key not in seen_emails:
                     seen_emails.add(key)
                     contacts.append(contact)
 
@@ -80,21 +107,43 @@ class EmailFinder:
             "delay_ms": settings.smtp_verify_delay_ms,
         }
 
-    async def _verify_person(self, name: str, title: str, domain: str) -> Contact | None:
+    def _pattern_match_on_site(
+        self, first: str, last: str, domain: str, known: set[str]
+    ) -> Contact | None:
+        for candidate in generate_patterns(first, last, domain):
+            if candidate.email.lower() in known:
+                return Contact(
+                    name=f"{first} {last}".strip(),
+                    email=candidate.email,
+                    title="Recruiter",
+                    confidence=85,
+                    pattern=candidate.pattern,
+                    verification_status="found_on_site",
+                )
+        return None
+
+    async def _verify_person(
+        self, name: str, title: str, domain: str, known: set[str]
+    ) -> Contact | None:
         parts = [p for p in re.sub(r"[^a-zA-Z\s'-]", " ", name).split() if p]
         if len(parts) < 2:
             return None
 
         first, last = parts[0], parts[-1]
-        if not settings.smtp_verify_enabled:
+        on_site = self._pattern_match_on_site(first, last, domain, known)
+        if on_site:
+            on_site.title = title or on_site.title
+            return on_site
+
+        if not self._can_smtp_verify():
             email = f"{normalize_name(first)}.{normalize_name(last)}@{domain}"
             return Contact(
                 name=name,
                 email=email,
                 title=title,
-                confidence=40,
+                confidence=48,
                 pattern="first.last",
-                verification_status="guess",
+                verification_status="pattern_guess",
             )
 
         await rate_limiter.acquire("smtp_verify")
@@ -102,27 +151,10 @@ class EmailFinder:
             result = await find_email(first, last, domain, **self._verify_options())
         except Exception as exc:
             logger.warning("SMTP verify failed for %s at %s: %s", name, domain, exc)
-            email = f"{normalize_name(first)}.{normalize_name(last)}@{domain}"
-            return Contact(
-                name=name,
-                email=email,
-                title=title,
-                confidence=35,
-                pattern="first.last",
-                verification_status="error",
-            )
+            return None
 
         if result.note and not result.mx_host:
-            patterns = generate_patterns(first, last, domain)
-            email = patterns[0].email if patterns else f"{normalize_name(first)}.{normalize_name(last)}@{domain}"
-            return Contact(
-                name=name,
-                email=email,
-                title=title,
-                confidence=35,
-                pattern="first.last",
-                verification_status="guess",
-            )
+            return None
 
         best = result.best_guess
         if not best:
@@ -130,14 +162,14 @@ class EmailFinder:
 
         accepted = next((c for c in result.candidates if c.email == best), None)
         pattern = accepted.pattern if accepted else "first.last"
-        status = accepted.status if accepted else ("guess" if result.catch_all else "unknown")
+        status = accepted.status if accepted else ("pattern_guess" if result.catch_all else "unknown")
 
         if result.catch_all:
-            confidence = 55
+            confidence = 58
         elif status == "accepted":
             confidence = 92
         else:
-            confidence = 45
+            return None
 
         return Contact(
             name=name,
@@ -150,14 +182,19 @@ class EmailFinder:
         )
 
     async def _search_osint_verified(
-        self, company: str, domain: str, job_title: str, limit: int
+        self,
+        company: str,
+        domain: str,
+        job_title: str,
+        known: set[str],
+        limit: int,
     ) -> list[Contact]:
-        raw = await self._search_osint(company, domain, limit * 2)
+        raw = await self._search_osint(company, domain, limit * 3)
         contacts: list[Contact] = []
         for person in raw:
             if len(contacts) >= limit:
                 break
-            verified = await self._verify_person(person.name, person.title, domain)
+            verified = await self._verify_person(person.name, person.title, domain, known)
             if verified:
                 contacts.append(verified)
         return contacts
@@ -166,21 +203,15 @@ class EmailFinder:
         if limit <= 0:
             return []
 
-        if not settings.smtp_verify_enabled:
-            return [
-                Contact(name="HR Team", email=f"careers@{domain}", title="Human Resources", confidence=30, verification_status="guess"),
-                Contact(name="Recruiting", email=f"jobs@{domain}", title="Recruiting", confidence=28, verification_status="guess"),
-            ][:limit]
-
         await rate_limiter.acquire("smtp_verify")
         try:
             result = await find_generic_emails(domain, limit=limit, **self._verify_options())
         except Exception as exc:
             logger.warning("Generic SMTP verify failed for %s: %s", domain, exc)
-            return self._fallback_contacts("", domain, limit)
+            return []
 
         if result.note and not result.mx_host:
-            return self._fallback_contacts("", domain, limit)
+            return []
 
         labels = {
             "careers": ("HR Team", "Human Resources"),
@@ -203,10 +234,10 @@ class EmailFinder:
             local = candidate.pattern or candidate.email.split("@")[0]
             name, title = labels.get(local, ("Hiring Team", "Recruiting"))
             if result.catch_all:
-                confidence = 50
+                confidence = 52
                 status = "catch_all"
             elif candidate.status == "accepted":
-                confidence = 78
+                confidence = 80
                 status = "accepted"
             else:
                 continue
@@ -223,21 +254,6 @@ class EmailFinder:
             )
             if len(contacts) >= limit:
                 break
-
-        if not contacts and result.catch_all and result.best_guess:
-            local = result.best_guess.split("@")[0]
-            name, title = labels.get(local, ("Hiring Team", "Recruiting"))
-            contacts.append(
-                Contact(
-                    name=name,
-                    email=result.best_guess,
-                    title=title,
-                    confidence=45,
-                    pattern=local,
-                    verification_status="catch_all",
-                    catch_all=True,
-                )
-            )
         return contacts
 
     async def _search_rocketreach(self, company: str, domain: str, limit: int) -> list[Contact]:
@@ -324,76 +340,96 @@ class EmailFinder:
         seen_names: set[str] = set()
 
         queries = [
-            f'site:linkedin.com/in/ "HR" "{company}"',
-            f'site:linkedin.com/in/ "Recruiter" "{company}"',
-            f'site:linkedin.com/in/ "Talent Acquisition" "{company}"',
+            f'site:linkedin.com/in/ recruiter "{company}"',
+            f'site:linkedin.com/in/ "talent acquisition" "{company}"',
+            f'site:linkedin.com/in/ "human resources" "{company}"',
+            f'"{company}" recruiter {domain}',
         ]
 
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
         }
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
             for query in queries:
                 if len(contacts) >= limit:
                     break
 
-                try:
-                    res = await client.post("https://html.duckduckgo.com/html/", data={"q": query}, headers=headers)
-                    if res.status_code != 200:
-                        continue
-
-                    soup = BeautifulSoup(res.text, "html.parser")
-                    results = soup.select(".result__body")
-
-                    for r in results:
-                        if len(contacts) >= limit:
-                            break
-
-                        title_el = r.select_one(".result__title a")
-                        if not title_el:
+                for fetch in (
+                    lambda q=query: client.get("https://html.duckduckgo.com/html/", params={"q": q}, headers=headers),
+                    lambda q=query: client.post(
+                        "https://html.duckduckgo.com/html/",
+                        data={"q": q, "kl": "us-en"},
+                        headers={**headers, "Content-Type": "application/x-www-form-urlencoded"},
+                    ),
+                ):
+                    try:
+                        res = await fetch()
+                        if res.status_code != 200:
                             continue
 
-                        title_text = title_el.get_text(strip=True)
-                        title_text = re.sub(r"\s*\|\s*LinkedIn.*$", "", title_text, flags=re.IGNORECASE)
-
-                        parts = [p.strip() for p in title_text.split("-")]
-                        if not parts:
-                            continue
-
-                        name = parts[0].strip()
-                        job_title = parts[1].strip() if len(parts) > 1 else "Recruiter"
-
-                        if len(name.split()) > 4 or any(
-                            keyword in name.lower() for keyword in ["jobs", "careers", "hiring", "recruiting"]
-                        ):
-                            continue
-
-                        key = name.lower()
-                        if key in seen_names:
-                            continue
-                        seen_names.add(key)
-                        contacts.append(Contact(name=name, email="", title=job_title, confidence=0))
-
-                except Exception as exc:
-                    logger.warning("OSINT search failed for query '%s': %s", query, exc)
+                        parsed = self._parse_search_people(res.text)
+                        for name, job_title in parsed:
+                            if len(contacts) >= limit:
+                                break
+                            key = name.lower()
+                            if key in seen_names:
+                                continue
+                            seen_names.add(key)
+                            contacts.append(Contact(name=name, email="", title=job_title, confidence=0))
+                    except Exception as exc:
+                        logger.debug("OSINT search failed for '%s': %s", query, exc)
 
         return contacts
 
     @staticmethod
-    def _normalize_domain(domain: str, company: str) -> str:
-        if domain and "." in domain:
-            return domain.lower().strip()
-        if company:
-            clean = company.lower().replace(" ", "").replace(",", "").replace(".", "")
-            return f"{clean}.com"
-        return ""
+    def _parse_search_people(html: str) -> list[tuple[str, str]]:
+        soup = BeautifulSoup(html, "html.parser")
+        people: list[tuple[str, str]] = []
+        seen: set[str] = set()
+
+        link_selectors = (
+            "a.result__a",
+            ".result__title a",
+            "h2 a",
+            "a[href*='linkedin.com/in/']",
+        )
+        links = []
+        for sel in link_selectors:
+            links.extend(soup.select(sel))
+
+        for link in links:
+            href = link.get("href", "")
+            title_text = link.get_text(strip=True)
+            if "linkedin.com/in/" not in href and "linkedin" not in title_text.lower():
+                continue
+
+            title_text = re.sub(r"\s*\|\s*LinkedIn.*$", "", title_text, flags=re.IGNORECASE)
+            title_text = re.sub(r"\s*-\s*LinkedIn.*$", "", title_text, flags=re.IGNORECASE)
+            parts = re.split(r"\s[-–|]\s", title_text)
+            if not parts:
+                continue
+
+            name = parts[0].strip()
+            job_title = parts[1].strip() if len(parts) > 1 else "Recruiter"
+
+            if len(name.split()) > 4:
+                continue
+            if any(k in name.lower() for k in ("jobs", "careers", "hiring", "linkedin", "profile")):
+                continue
+            if name.lower() in seen:
+                continue
+            seen.add(name.lower())
+            people.append((name, job_title))
+
+        return people
 
     @staticmethod
-    def _fallback_contacts(company: str, domain: str, limit: int) -> list[Contact]:
-        domain = domain or f"{company.lower().replace(' ', '')}.com"
-        return [
-            Contact(name="HR Team", email=f"careers@{domain}", title="Human Resources", confidence=25, verification_status="guess"),
-            Contact(name="Recruiting", email=f"jobs@{domain}", title="Recruiting", confidence=23, verification_status="guess"),
-            Contact(name="Talent", email=f"talent@{domain}", title="Talent Acquisition", confidence=21, verification_status="guess"),
-        ][:limit]
+    def _normalize_domain(domain: str, company: str) -> str:
+        if domain and "." in domain:
+            return domain.lower().strip().lstrip("www.")
+        if company:
+            clean = re.sub(r"[^a-z0-9]", "", company.lower())
+            return f"{clean}.com" if clean else ""
+        return ""

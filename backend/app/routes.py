@@ -913,15 +913,23 @@ async def find_application_contacts(
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
-    """Look up outreach contacts for the job's company via OSINT + SMTP verification."""
+    """Look up outreach contacts via website scrape, search, and optional SMTP verify."""
     app = _owned_application(db, application_id, profile, with_job=True)
     if not app.job:
         raise HTTPException(status_code=400, detail="Application has no associated job")
 
+    domain = (app.job.company_domain or "").strip()
+    if not domain and app.job.url:
+        from urllib.parse import urlparse
+
+        host = urlparse(app.job.url).netloc.lower().removeprefix("www.")
+        if host and "." in host and "linkedin.com" not in host and "indeed.com" not in host:
+            domain = host
+
     finder = EmailFinder()
     contacts = await finder.find_contacts(
         company=app.job.company,
-        domain=app.job.company_domain,
+        domain=domain,
         job_title=app.job.title,
         limit=settings.max_emails_per_company,
     )

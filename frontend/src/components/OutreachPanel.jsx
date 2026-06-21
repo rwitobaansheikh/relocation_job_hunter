@@ -4,10 +4,12 @@ import HelpButton from './HelpButton'
 
 function verificationLabel(status, catchAll) {
   if (catchAll) return 'Catch-all (best guess)'
-  if (status === 'accepted') return 'Verified'
+  if (status === 'accepted') return 'SMTP verified'
+  if (status === 'found_on_site') return 'Found on website'
+  if (status === 'pattern_guess') return 'Likely pattern'
   if (status === 'guess') return 'Unverified guess'
   if (status === 'error') return 'Could not verify'
-  if (status) return status
+  if (status) return status.replace(/_/g, ' ')
   return 'Unknown'
 }
 
@@ -145,7 +147,7 @@ export default function OutreachPanel({ applicationId, open, companyDomain, onSe
               </div>
               <div className="contact-card__email">{c.email}</div>
               <div className="contact-card__meta">
-                <span className={`badge badge-${c.verification_status === 'accepted' ? 'applied' : 'discovered'}`}>
+                <span className={`badge badge-${['accepted', 'found_on_site'].includes(c.verification_status) ? 'applied' : c.verification_status === 'pattern_guess' ? 'discovered' : 'rejected'}`}>
                   {verificationLabel(c.verification_status, c.catch_all)}
                 </span>
                 {c.confidence > 0 && <span className="muted">{c.confidence}% confidence</span>}
@@ -157,7 +159,10 @@ export default function OutreachPanel({ applicationId, open, companyDomain, onSe
       )}
 
       {contacts && contacts.length === 0 && !loading && (
-        <p className="muted">No contacts yet. Make sure the job has a company domain, then click Find contacts.</p>
+        <p className="muted">
+          No contacts found yet. Add the company domain on the job (e.g. company.com), then try again —
+          we scan their careers/contact pages and public listings for real addresses.
+        </p>
       )}
 
       {emails && emails.length > 0 && (

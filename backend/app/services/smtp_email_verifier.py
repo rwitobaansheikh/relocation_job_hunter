@@ -8,6 +8,7 @@ company's MX server via RCPT TO — without sending any message (no DATA).
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import re
 import socket
@@ -16,6 +17,8 @@ import unicodedata
 from dataclasses import dataclass, field
 
 import dns.resolver
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT_S = 10.0
 DEFAULT_HELO = "verifier.local"
@@ -384,3 +387,23 @@ async def find_email(
 
 async def find_generic_emails(domain: str, **kwargs) -> FindEmailResult:
     return await asyncio.to_thread(find_generic_emails_sync, domain, **kwargs)
+
+
+_port25_available: bool | None = None
+
+
+def smtp_port25_available(timeout_s: float = 4.0) -> bool:
+    """Return False when outbound SMTP (port 25) is blocked — common on cloud hosts."""
+    global _port25_available
+    if _port25_available is not None:
+        return _port25_available
+    try:
+        records = dns.resolver.resolve("gmail.com", "MX")
+        mx_host = str(sorted(records, key=lambda r: r.preference)[0].exchange).rstrip(".")
+        sock = socket.create_connection((mx_host, 25), timeout=timeout_s)
+        sock.close()
+        _port25_available = True
+    except OSError as exc:
+        logger.info("Outbound SMTP port 25 unavailable — skipping RCPT TO verification: %s", exc)
+        _port25_available = False
+    return _port25_available
