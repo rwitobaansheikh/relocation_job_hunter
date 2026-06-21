@@ -26,17 +26,32 @@ def _smtp_configured() -> bool:
     return bool(settings.smtp_user and settings.smtp_password)
 
 
+def _valid_attachment_paths(paths: list[str] | None) -> list[str]:
+    valid: list[str] = []
+    for file_path in paths or []:
+        if not file_path or not str(file_path).strip():
+            continue
+        path = Path(file_path)
+        if path.is_file():
+            valid.append(str(path))
+    return valid
+
+
 async def send_system_email(
     to: str,
     subject: str,
     body_text: str,
     body_html: str | None = None,
     attachments: list[str] | None = None,
-) -> bool:
-    """Deliver an app email to a user. Returns False if SMTP is not configured."""
-    if not _smtp_configured() or not to:
-        logger.warning("System email skipped (SMTP not configured or no recipient): %s", subject)
-        return False
+) -> tuple[bool, str | None]:
+    """Deliver an app email to a user. Returns (success, error_message)."""
+    if not _smtp_configured():
+        msg = "App mail is not configured (SMTP_USER / SMTP_PASSWORD missing on the server)."
+        logger.warning("System email skipped: %s subject=%s", msg, subject)
+        return False, msg
+
+    if not to:
+        return False, "No recipient email address."
 
     if body_html:
         msg = MIMEMultipart("mixed")
@@ -52,24 +67,39 @@ async def send_system_email(
     msg["From"] = system_from_header()
     msg["To"] = to
 
-    for file_path in attachments or []:
+    for file_path in _valid_attachment_paths(attachments):
         path = Path(file_path)
-        if path.exists():
-            with open(path, "rb") as f:
-                part = MIMEApplication(f.read(), Name=path.name)
-            part["Content-Disposition"] = f'attachment; filename="{path.name}"'
-            msg.attach(part)
+        with open(path, "rb") as f:
+            part = MIMEApplication(f.read(), Name=path.name)
+        part["Content-Disposition"] = f'attachment; filename="{path.name}"'
+        msg.attach(part)
+
+    sender = settings.smtp_user.strip()
+    use_ssl = settings.smtp_port == 465
 
     try:
         await aiosmtplib.send(
             msg,
+            sender=sender,
+            recipients=[to],
             hostname=settings.smtp_host,
             port=settings.smtp_port,
             username=settings.smtp_user,
             password=settings.smtp_password,
-            start_tls=True,
+            use_tls=use_ssl,
+            start_tls=not use_ssl,
+            timeout=60,
         )
-        return True
+        return True, None
     except Exception as exc:
-        logger.error("System email failed to %s: %s", to, exc)
-        return False
+        error = str(exc).strip() or exc.__class__.__name__
+        logger.error("System email failed to %s: %s", to, error)
+        hint = (
+            " If you use Gmail/Google Workspace from a cloud server, try Amazon SES SMTP "
+            "or an email API — Google often blocks SMTP login from datacenter IPs."
+        )
+        if "535" in error or "534" in error or "authentication" in error.lower():
+            error = f"{error}. Check SMTP_USER/SMTP_PASSWORD (use an app password for Gmail).{hint}"
+        elif "timeout" in error.lower() or "timed out" in error.lower():
+            error = f"{error}. The mail server did not respond — verify SMTP_HOST/SMTP_PORT.{hint}"
+        return False, error

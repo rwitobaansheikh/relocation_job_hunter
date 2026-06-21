@@ -111,7 +111,11 @@ export default function OutreachPanel({
       await loadHistory()
       if (onSent) onSent()
       if (testToSelf) {
-        setInfo('Preview sent from email@jobapplicationflow.com — check your inbox (and spam).')
+        const result = results[0]
+        if (result?.status === 'failed') {
+          throw new Error(result.error_message || 'Test email failed to send.')
+        }
+        setInfo(`Preview sent to ${result?.recipient_email || 'your inbox'} from email@jobapplicationflow.com — check spam too.`)
       } else if (dryRun) {
         setInfo(`Preview ready for ${results.length} recipient(s) — nothing was sent.`)
       } else {

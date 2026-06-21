@@ -83,16 +83,24 @@ async def process_trial_notifications(db: Session) -> int:
             and user.trial_end > now
         ):
             to, subject, text, html = send_trial_ending_email(user)
-            await send_system_email(to, subject, text, html)
-            user.trial_reminder_sent = True
-            processed += 1
+            ok, err = await send_system_email(to, subject, text, html)
+            if not ok:
+                logger.warning("Trial ending email failed for %s: %s", to, err)
+            else:
+                user.trial_reminder_sent = True
+                processed += 1
+            continue
 
         # Internal trial or lapsed subscription: expired email once.
         if plan == "expired" and not user.trial_expired_email_sent:
             to, subject, text, html = send_trial_expired_email(user)
-            await send_system_email(to, subject, text, html)
-            user.trial_expired_email_sent = True
-            processed += 1
+            ok, err = await send_system_email(to, subject, text, html)
+            if not ok:
+                logger.warning("Trial expired email failed for %s: %s", to, err)
+            else:
+                user.trial_expired_email_sent = True
+                processed += 1
+            continue
 
     if processed:
         db.commit()

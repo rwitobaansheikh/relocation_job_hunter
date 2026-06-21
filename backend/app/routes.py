@@ -239,17 +239,16 @@ async def submit_contact(data: ContactCreate, db: Session = Depends(get_db)):
     # Best-effort notification to the site owner; never fail the request if the
     # shared mailbox isn't configured (the message is already stored).
     emailed = False
-    try:
-        subject = f"[Contact] {data.subject.strip() or 'New message'} - {data.name.strip()}"
-        body = (
-            f"From: {data.name.strip()} <{data.email}>\n"
-            f"Subject: {data.subject.strip() or '(none)'}\n\n"
-            f"{data.message.strip()}\n"
-        )
-        await send_system_email(settings.contact_email, subject, body)
-        emailed = True
-    except Exception as exc:  # pragma: no cover - depends on SMTP config
-        logger.warning("Contact email could not be delivered: %s", exc)
+    subject = f"[Contact] {data.subject.strip() or 'New message'} - {data.name.strip()}"
+    body = (
+        f"From: {data.name.strip()} <{data.email}>\n"
+        f"Subject: {data.subject.strip() or '(none)'}\n\n"
+        f"{data.message.strip()}\n"
+    )
+    ok, smtp_error = await send_system_email(settings.contact_email, subject, body)
+    emailed = ok
+    if not ok:
+        logger.warning("Contact email could not be delivered: %s", smtp_error)
 
     return {"ok": True, "emailed": emailed}
 

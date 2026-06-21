@@ -90,6 +90,15 @@ class EmailService:
         if not application.tailored_cv_path:
             raise ValueError("Documents not tailored yet. Run tailor first.")
 
+        background = self._build_background(profile, application)
+
+        if test_to_self:
+            return [
+                await self._send_test_to_self(
+                    db, application, profile, job, [], background
+                )
+            ]
+
         contacts = await self.finder.find_contacts(
             company=job.company,
             domain=job.company_domain,
@@ -101,25 +110,14 @@ class EmailService:
         if max_recipients is not None:
             contacts = contacts[: max(0, max_recipients)]
 
-        background = self._build_background(profile, application)
         smtp = self._smtp_config(profile)
-
-        # Test mode: actually deliver one real email to the user's own inbox
-        # (with attachments) so SMTP can be verified end-to-end, without
-        # contacting the real recipients.
-        if test_to_self:
-            return [
-                await self._send_test_to_self(
-                    db, application, profile, job, contacts, background, smtp
-                )
-            ]
 
         results: list[OutreachEmail] = []
         for contact in contacts:
             subject, body = await self._generate_email(profile, job, contact, background)
 
             outreach = OutreachEmail(
-                application_id=application_id,
+                application_id=application.id,
                 recipient_name=contact.name,
                 recipient_email=contact.email,
                 recipient_title=contact.title,
@@ -167,10 +165,8 @@ class EmailService:
         job,
         contacts: list[Contact],
         background: str,
-        smtp: dict | None = None,
     ) -> OutreachEmail:
         """Send a preview to the user from the app mailbox, not their SMTP."""
-        del smtp  # outreach tests always use the system sender
         self_address = self._registered_email(profile)
         if not self_address:
             raise ValueError(
@@ -178,7 +174,7 @@ class EmailService:
             )
 
         primary = contacts[0] if contacts else Contact(name="Hiring Team", email="", title="")
-        intended = ", ".join(f"{c.name} <{c.email}>".strip() for c in contacts) or "(no contacts found)"
+        intended = ", ".join(f"{c.name} <{c.email}>".strip() for c in contacts) or "(no contacts found yet)"
         real_subject, real_body = await self._generate_email(profile, job, primary, background)
         subject = f"[TEST] {real_subject}"
         body = (
@@ -193,6 +189,12 @@ class EmailService:
             + real_body
         )
 
+        attachments = [
+            p
+            for p in (application.tailored_cv_path, application.tailored_cover_letter_path)
+            if p
+        ]
+
         outreach = OutreachEmail(
             application_id=application.id,
             recipient_name="Me (test preview)",
@@ -202,30 +204,25 @@ class EmailService:
             body=body,
             status="pending",
         )
-        try:
-            sent = await send_system_email(
-                self_address,
-                subject,
-                body,
-                attachments=[
-                    application.tailored_cv_path,
-                    application.tailored_cover_letter_path,
-                ],
-            )
-            if not sent:
-                raise ValueError(
-                    "App mail is not configured. Contact support if test emails fail to arrive."
-                )
+        sent, smtp_error = await send_system_email(
+            self_address,
+            subject,
+            body,
+            attachments=attachments,
+        )
+        if not sent:
+            outreach.status = "failed"
+            outreach.error_message = smtp_error or "Failed to send test email."
+            logger.error("Test preview to %s failed: %s", self_address, outreach.error_message)
+        else:
             outreach.status = "test_sent"
             outreach.sent_at = datetime.utcnow()
-        except Exception as exc:
-            outreach.status = "failed"
-            outreach.error_message = str(exc)
-            logger.error("Test preview to %s failed: %s", self_address, exc)
 
         db.add(outreach)
         db.commit()
         db.refresh(outreach)
+        if outreach.status == "failed":
+            raise ValueError(outreach.error_message or "Failed to send test email.")
         return outreach
 
     def _build_background(self, profile, application) -> str:
@@ -434,12 +431,15 @@ Best regards,
         msg.attach(MIMEText(body, "plain"))
 
         for file_path in attachments:
+            if not file_path or not str(file_path).strip():
+                continue
             path = Path(file_path)
-            if path.exists():
-                with open(path, "rb") as f:
-                    part = MIMEApplication(f.read(), Name=path.name)
-                part["Content-Disposition"] = f'attachment; filename="{path.name}"'
-                msg.attach(part)
+            if not path.is_file():
+                continue
+            with open(path, "rb") as f:
+                part = MIMEApplication(f.read(), Name=path.name)
+            part["Content-Disposition"] = f'attachment; filename="{path.name}"'
+            msg.attach(part)
 
         await aiosmtplib.send(
             msg,
