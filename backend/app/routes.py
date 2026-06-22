@@ -41,7 +41,8 @@ from app.schemas import (
     LoginRequest,
     ManualJobRequest,
     OutreachEmailResponse,
-    RegisterRequest,
+    RecruitingEmailFindRequest,
+    RecruitingEmailFindResponse,
     ReviewCreate,
     ReviewPublic,
     RoleSuggestResponse,
@@ -62,7 +63,7 @@ from app.services.account import delete_account
 from app.services.document_generator import DocumentGenerator
 from app.services.cv_link_extractor import build_project_link_map, serialize_project_links
 from app.services.document_parser import extract_text_from_file
-from app.services.email_finder import EmailFinder
+from app.services.email_scraper import EmailScraper
 from app.services.email_service import EmailService
 from app.services.job_matcher import JobMatcher
 from app.services.job_search import JobSearchService, SearchFilters
@@ -656,27 +657,63 @@ def get_outreach_emails(
     return db.query(OutreachEmail).filter(OutreachEmail.application_id == application_id).all()
 
 
+@router.post("/recruiting-emails/find", response_model=RecruitingEmailFindResponse)
+async def find_recruiting_emails(
+    request: RecruitingEmailFindRequest,
+    profile: UserProfile = Depends(get_current_profile),
+):
+    """Find 3–6 HR/recruiting emails via web scraping, search, and AI."""
+    company = request.company.strip()
+    website = request.website.strip()
+    job_url = request.job_url.strip()
+    if not any([company, website, job_url]):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide at least one of: company, website, or job_url.",
+        )
+
+    scraper = EmailScraper()
+    result = await scraper.find_recruiting_emails(
+        company=company,
+        website=website,
+        job_url=job_url,
+        min_contacts=3,
+        max_contacts=settings.max_emails_per_company,
+    )
+    return RecruitingEmailFindResponse(
+        company=result.company,
+        domain=result.domain,
+        contacts=[
+            ContactResponse(name=c.name, email=c.email, title=c.title, confidence=c.confidence)
+            for c in result.contacts
+        ],
+        sources_used=result.sources_used,
+        message=result.message,
+    )
+
+
 @router.get("/applications/{application_id}/contacts", response_model=list[ContactResponse])
 async def find_application_contacts(
     application_id: int,
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
-    """Look up outreach contacts (emails) for the job's company via Hunter.io."""
+    """Look up HR/recruiting contacts for the job's company via the email scraper."""
     app = _owned_application(db, application_id, profile, with_job=True)
     if not app.job:
         raise HTTPException(status_code=400, detail="Application has no associated job")
 
-    finder = EmailFinder()
-    contacts = await finder.find_contacts(
+    scraper = EmailScraper()
+    result = await scraper.find_recruiting_emails(
         company=app.job.company,
-        domain=app.job.company_domain,
-        job_title=app.job.title,
-        limit=settings.max_emails_per_company,
+        website=app.job.company_domain,
+        job_url=app.job.url,
+        min_contacts=3,
+        max_contacts=settings.max_emails_per_company,
     )
     return [
         ContactResponse(name=c.name, email=c.email, title=c.title, confidence=c.confidence)
-        for c in contacts
+        for c in result.contacts
     ]
 
 

@@ -15,12 +15,12 @@ from sqlalchemy.orm import Session, joinedload
 from app.config import settings
 from app.database import ApplicationStatus, JobApplication, OutreachEmail, UserProfile
 from app.security import decrypt_secret
-from app.services.email_finder import Contact, EmailFinder
+from app.services.email_scraper import Contact, EmailScraper
 from app.services.llm import llm_generate
 
 logger = logging.getLogger(__name__)
 
-# Hunter sometimes only yields a generic mailbox (careers@, jobs@) for which we
+# Generic mailboxes (careers@, jobs@) get a placeholder "name". These are NOT
 # synthesize a placeholder "name". These are NOT real people, so we must greet
 # them as a team rather than "Dear Recruiting,".
 _GENERIC_NAMES = {
@@ -46,7 +46,7 @@ EMAIL_SYSTEM = (
 
 class EmailService:
     def __init__(self) -> None:
-        self.finder = EmailFinder()
+        self.scraper = EmailScraper()
 
     @staticmethod
     def _registered_email(profile) -> str:
@@ -81,12 +81,14 @@ class EmailService:
         if not application.tailored_cv_path:
             raise ValueError("Documents not tailored yet. Run tailor first.")
 
-        contacts = await self.finder.find_contacts(
+        result = await self.scraper.find_recruiting_emails(
             company=job.company,
-            domain=job.company_domain,
-            job_title=job.title,
-            limit=settings.max_emails_per_company,
+            website=job.company_domain,
+            job_url=job.url,
+            min_contacts=3,
+            max_contacts=settings.max_emails_per_company,
         )
+        contacts = result.contacts
         # Automation passes a per-company cap so a single send can't exceed the
         # user's per-domain limit.
         if max_recipients is not None:

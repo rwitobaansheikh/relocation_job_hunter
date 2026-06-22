@@ -9,7 +9,7 @@ Automated job search platform that discovers roles across major job boards, sugg
 - **AI role suggestions** from your uploaded CV and cover letter
 - **CV-based relevance scoring** to rank up to 100 best-matching jobs
 - **AI document tailoring** — generates a per-job one-page CV and cover letter (PDF) using a local LLM (Ollama), with match score, score breakdown, and gap analysis
-- **Email outreach** — finds up to 5 contacts per company via Hunter.io and sends tailored applications
+- **Email outreach** — built-in recruiting email scraper (website + search + AI) finds 3–6 HR contacts per company and sends tailored applications
 - **Web dashboard** — upload documents, track applications, manage follow-ups
 
 ## Architecture
@@ -23,7 +23,7 @@ relocation-job-hunter/
 │       │   ├── job_search.py
 │       │   ├── job_matcher.py
 │       │   ├── document_generator.py
-│       │   ├── email_finder.py
+│       │   ├── email_scraper.py
 │       │   └── email_service.py
 │       ├── routes.py
 │       └── main.py
@@ -38,7 +38,6 @@ relocation-job-hunter/
 - Node.js 18+
 - **Ollama** (local LLM, default) — [install Ollama](https://ollama.com), then `ollama pull llama3.2:3b`
 - Optional API keys (see `.env.example`):
-  - **Hunter.io** — for finding/verifying hiring manager emails (optional; falls back to generic addresses)
   - **SMTP** — for sending outreach emails (Gmail app password works)
   - **Google Gemini** — only if you set `LLM_PROVIDER=gemini` instead of local Ollama
 
@@ -58,7 +57,7 @@ source venv/bin/activate
 
 pip install -r requirements.txt
 cp ../.env.example .env
-# Edit .env (SMTP, Hunter, etc.)
+# Edit .env (SMTP, etc.)
 
 uvicorn app.main:app --reload --port 8000
 ```
@@ -117,7 +116,8 @@ Open http://localhost:5173 in your browser.
 | POST | `/api/jobs/search` | Search and store jobs |
 | GET | `/api/applications` | List applications |
 | POST | `/api/applications/tailor` | Tailor documents (batch) |
-| POST | `/api/applications/send-outreach` | Send outreach emails |
+| POST | `/api/recruiting-emails/find` | Find HR/recruiting emails for a company |
+| GET | `/api/applications/{id}/contacts` | Find contacts for an application |
 | POST | `/api/applications/follow-up` | Log follow-up |
 | GET | `/api/dashboard/stats` | Dashboard statistics |
 

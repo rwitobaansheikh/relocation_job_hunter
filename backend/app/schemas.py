@@ -408,6 +408,21 @@ class ContactResponse(BaseModel):
     confidence: int = 0
 
 
+class RecruitingEmailFindRequest(BaseModel):
+    """Find HR/recruiting emails for a company. Provide at least one of company, website, or job_url."""
+    company: str = ""
+    website: str = ""
+    job_url: str = ""
+
+
+class RecruitingEmailFindResponse(BaseModel):
+    company: str = ""
+    domain: str = ""
+    contacts: list[ContactResponse] = Field(default_factory=list)
+    sources_used: list[str] = Field(default_factory=list)
+    message: str = ""
+
+
 class OutreachEmailResponse(BaseModel):
     id: int
     application_id: int
