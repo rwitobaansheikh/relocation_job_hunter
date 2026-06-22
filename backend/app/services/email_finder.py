@@ -25,6 +25,17 @@ from app.services.website_email_scraper import WebsiteEmailScraper
 
 logger = logging.getLogger(__name__)
 
+MIN_CONTACTS = 3
+
+_GENERIC_FALLBACKS = (
+    ("HR Team", "careers", "Human Resources"),
+    ("Recruiting", "jobs", "Recruiting"),
+    ("Talent Acquisition", "talent", "Talent Acquisition"),
+    ("People Team", "people", "People Operations"),
+    ("Hiring Team", "hiring", "Hiring"),
+    ("Recruitment", "recruitment", "Recruitment"),
+)
+
 
 @dataclass
 class Contact:
@@ -51,13 +62,42 @@ class EmailFinder:
             self._smtp_available = smtp_port25_available()
         return self._smtp_available
 
-    async def find_contacts(self, company: str, domain: str, job_title: str, limit: int = 5) -> list[Contact]:
+    async def find_contacts(
+        self,
+        company: str,
+        domain: str,
+        job_title: str,
+        limit: int | None = None,
+        job_url: str = "",
+        min_contacts: int | None = None,
+    ) -> list[Contact]:
+        limit = limit or settings.max_emails_per_company
+        min_contacts = min_contacts or settings.min_emails_per_company
+        min_contacts = max(1, min(min_contacts, limit))
+
         domain = self._normalize_domain(domain, company)
         if not domain:
             return []
 
         contacts: list[Contact] = []
         seen_emails: set[str] = set()
+
+        if job_url:
+            for item in await self._website.scrape_job_posting(job_url, domain):
+                key = item.email.lower()
+                if key in seen_emails:
+                    continue
+                seen_emails.add(key)
+                contacts.append(
+                    Contact(
+                        name=item.name,
+                        email=item.email,
+                        title=item.title,
+                        confidence=item.confidence,
+                        pattern=item.email.split("@")[0],
+                        verification_status=item.verification_status,
+                    )
+                )
 
         scraped = await self._website.find_emails(company, domain, limit=limit * 2)
         for item in scraped:
@@ -101,8 +141,38 @@ class EmailFinder:
                     seen_emails.add(key)
                     contacts.append(contact)
 
+        if len(contacts) < min_contacts:
+            contacts = self._pad_generic_guesses(contacts, domain, min_contacts, seen_emails)
+
         contacts.sort(key=lambda c: c.confidence, reverse=True)
         return contacts[:limit]
+
+    def _pad_generic_guesses(
+        self,
+        contacts: list[Contact],
+        domain: str,
+        min_contacts: int,
+        seen_emails: set[str],
+    ) -> list[Contact]:
+        for name, local, title in _GENERIC_FALLBACKS:
+            if len(contacts) >= min_contacts:
+                break
+            email = f"{local}@{domain}"
+            key = email.lower()
+            if key in seen_emails:
+                continue
+            seen_emails.add(key)
+            contacts.append(
+                Contact(
+                    name=name,
+                    email=email,
+                    title=title,
+                    confidence=28,
+                    pattern=local,
+                    verification_status="guess",
+                )
+            )
+        return contacts
 
     def _verify_options(self) -> dict:
         return {

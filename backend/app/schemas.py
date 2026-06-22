@@ -441,6 +441,15 @@ class ContactsLookupResponse(BaseModel):
     resolved_domain: str = ""
     company: str = ""
     domain_was_job_board: bool = False
+    message: str = ""
+    sources_used: list[str] = Field(default_factory=list)
+
+
+class RecruitingEmailFindRequest(BaseModel):
+    """Find HR/recruiting emails. Provide at least one of company, website, or job_url."""
+    company: str = ""
+    website: str = ""
+    job_url: str = ""
 
 
 class UpdateCompanyDomainRequest(BaseModel):

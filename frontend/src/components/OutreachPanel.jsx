@@ -93,7 +93,8 @@ export default function OutreachPanel({
             : `No public recruiter emails found for ${label}. Many companies only use contact forms — try correcting the domain or reaching out on LinkedIn.`,
         )
       } else {
-        setInfo(`Found ${result.contacts.length} contact(s) for ${result.resolved_domain || companyName}.`)
+        const extra = result.message ? ` ${result.message}` : ''
+        setInfo(`Found ${result.contacts.length} contact(s) for ${result.resolved_domain || companyName}.${extra}`)
       }
     } catch (err) {
       setError(err.message)

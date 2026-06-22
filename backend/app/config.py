@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     system_email_name: str = "Job Application Flow"
     database_url: str = "sqlite:///./job_hunter.db"
     max_jobs_per_search: int = 100
-    max_emails_per_company: int = 5
+    max_emails_per_company: int = 6
+    min_emails_per_company: int = 3
     # SMTP RCPT TO verification for finding company/recruiter emails (see email_finder_lib/).
     smtp_verify_enabled: bool = True
     smtp_verify_helo_domain: str = "jobapplicationflow.com"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -194,16 +195,62 @@ class WebsiteEmailScraper:
         results.sort(key=lambda r: r.confidence, reverse=True)
         return results[:limit]
 
+    async def scrape_job_posting(self, job_url: str, domain: str) -> list[ScrapedEmail]:
+        """Extract @domain emails from a job listing page."""
+        domain = _clean_domain(domain)
+        if not job_url or not domain:
+            return []
+
+        seen: set[str] = set()
+        async with httpx.AsyncClient(
+            timeout=10.0,
+            follow_redirects=True,
+            headers=self._headers,
+        ) as client:
+            try:
+                res = await client.get(job_url)
+                if res.status_code >= 400:
+                    return []
+                emails = _extract_emails(res.text, domain)
+                soup = BeautifulSoup(res.text, "html.parser")
+                for tag in soup.select("a[href^=mailto:]"):
+                    href = tag.get("href", "")
+                    mail = href.split("mailto:", 1)[-1].split("?", 1)[0].strip().lower()
+                    if mail.endswith(f"@{domain}"):
+                        emails.add(mail)
+                found: list[ScrapedEmail] = []
+                path = urlparse(job_url).path or "/"
+                for email in emails:
+                    if email in seen:
+                        continue
+                    seen.add(email)
+                    local = email.split("@")[0]
+                    name, title = _name_from_local(local)
+                    found.append(
+                        ScrapedEmail(
+                            email=email,
+                            name=name,
+                            title=title,
+                            source=f"job_posting:{path}",
+                            confidence=_page_confidence(path, local) + 8,
+                        )
+                    )
+                return found
+            except Exception as exc:
+                logger.debug("Job posting scrape failed for %s: %s", job_url, exc)
+                return []
+
     async def _scrape_path(
         self,
         client: httpx.AsyncClient,
         host: str,
         path: str,
         seen: set[str],
+        source: str = "website",
     ) -> list[ScrapedEmail]:
         domain = _clean_domain(host.split("/")[0])
         found: list[ScrapedEmail] = []
-        url = f"https://{host}{path}"
+        url = f"https://{host}{path}" if not path.startswith("http") else path
         try:
             res = await client.get(url)
             if res.status_code >= 400:
@@ -227,8 +274,8 @@ class WebsiteEmailScraper:
                         email=email,
                         name=name,
                         title=title,
-                        source=f"website:{path or '/'}",
-                        confidence=_page_confidence(path, local),
+                        source=f"{source}:{path or '/'}",
+                        confidence=_page_confidence(path, local) + (6 if source == "job_posting" else 0),
                     )
                 )
         except Exception as exc:

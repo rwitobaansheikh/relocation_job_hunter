@@ -48,6 +48,7 @@ from app.schemas import (
     LoginRequest,
     ManualJobRequest,
     OutreachEmailResponse,
+    RecruitingEmailFindRequest,
     RegisterRequest,
     ReviewCreate,
     ReviewPublic,
@@ -937,6 +938,104 @@ def get_outreach_emails(
     return db.query(OutreachEmail).filter(OutreachEmail.application_id == application_id).all()
 
 
+@router.post("/recruiting-emails/find", response_model=ContactsLookupResponse)
+async def find_recruiting_emails(
+    request: RecruitingEmailFindRequest,
+    profile: UserProfile = Depends(get_current_profile),
+):
+    """Find 3–6 HR/recruiting emails from a company name, website, or job link."""
+    return await _lookup_recruiting_contacts(
+        company=request.company.strip(),
+        website=request.website.strip(),
+        job_url=request.job_url.strip(),
+    )
+
+
+async def _lookup_recruiting_contacts(
+    *,
+    company: str = "",
+    website: str = "",
+    job_url: str = "",
+) -> ContactsLookupResponse:
+    from app.services.company_domain_resolver import clean_domain, is_job_board_host, resolve_employer_domain
+    from app.services.url_importer import import_job_from_url
+
+    if not any([company, website, job_url]):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide at least one of: company, website, or job_url.",
+        )
+
+    job_title = ""
+    if job_url and not job_url.lower().startswith(("http://", "https://")):
+        job_url = "https://" + job_url
+
+    if job_url:
+        imported = await import_job_from_url(job_url)
+        company = company or imported.get("company", "")
+        website = website or imported.get("company_domain", "")
+        job_title = imported.get("title", "")
+
+    stored = clean_domain(website)
+    domain_was_job_board = bool(stored and is_job_board_host(stored))
+
+    domain = await resolve_employer_domain(
+        company=company,
+        company_domain=website,
+        job_url=job_url,
+    )
+
+    finder = EmailFinder()
+    contacts = await finder.find_contacts(
+        company=company,
+        domain=domain,
+        job_title=job_title,
+        limit=settings.max_emails_per_company,
+        job_url=job_url,
+        min_contacts=settings.min_emails_per_company,
+    )
+
+    sources_used: list[str] = ["website", "search"]
+    if job_url:
+        sources_used.insert(0, "job_posting")
+    if any(c.verification_status in ("accepted", "catch_all") for c in contacts):
+        sources_used.append("smtp_verify")
+    if any(c.verification_status == "guess" for c in contacts):
+        sources_used.append("fallback")
+
+    message = ""
+    if len(contacts) < settings.min_emails_per_company:
+        message = (
+            f"Only found {len(contacts)} contact(s). "
+            "Try providing the company website or a direct job link."
+        )
+    elif any(c.verification_status == "guess" for c in contacts):
+        message = (
+            "Some addresses are likely recruiting inboxes (unverified). "
+            "Confirm before sending outreach."
+        )
+
+    return ContactsLookupResponse(
+        contacts=[
+            ContactResponse(
+                name=c.name,
+                email=c.email,
+                title=c.title,
+                confidence=c.confidence,
+                pattern=c.pattern,
+                verification_status=c.verification_status,
+                catch_all=c.catch_all,
+            )
+            for c in contacts
+        ],
+        resolved_domain=domain,
+        company=company,
+        domain_was_job_board=domain_was_job_board,
+        message=message,
+        sources_used=sources_used,
+    )
+
+
 @router.get("/applications/{application_id}/contacts", response_model=ContactsLookupResponse)
 async def find_application_contacts(
     application_id: int,
@@ -969,7 +1068,30 @@ async def find_application_contacts(
         domain=domain,
         job_title=app.job.title,
         limit=settings.max_emails_per_company,
+        job_url=app.job.url or "",
+        min_contacts=settings.min_emails_per_company,
     )
+
+    sources_used: list[str] = ["website", "search"]
+    if app.job.url:
+        sources_used.insert(0, "job_posting")
+    if any(c.verification_status in ("accepted", "catch_all") for c in contacts):
+        sources_used.append("smtp_verify")
+    if any(c.verification_status == "guess" for c in contacts):
+        sources_used.append("fallback")
+
+    message = ""
+    if len(contacts) < settings.min_emails_per_company:
+        message = (
+            f"Only found {len(contacts)} contact(s). "
+            "Confirm the employer domain above and try again."
+        )
+    elif any(c.verification_status == "guess" for c in contacts):
+        message = (
+            "Some addresses are likely recruiting inboxes (unverified). "
+            "Confirm before sending outreach."
+        )
+
     return ContactsLookupResponse(
         contacts=[
             ContactResponse(
@@ -986,6 +1108,8 @@ async def find_application_contacts(
         resolved_domain=domain,
         company=app.job.company or "",
         domain_was_job_board=domain_was_job_board,
+        message=message,
+        sources_used=sources_used,
     )
 
 

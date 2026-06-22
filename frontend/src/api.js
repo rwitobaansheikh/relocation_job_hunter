@@ -193,6 +193,8 @@ export const api = {
   getDashboardStats: () => request('/dashboard/stats'),
   getOutreachEmails: (applicationId) => request(`/applications/${applicationId}/emails`),
   getContacts: (applicationId) => request(`/applications/${applicationId}/contacts`),
+  findRecruitingEmails: (payload) =>
+    request('/recruiting-emails/find', { method: 'POST', body: JSON.stringify(payload) }),
   updateCompanyDomain: (applicationId, companyDomain) =>
     request(`/applications/${applicationId}/company-domain`, {
       method: 'PATCH',

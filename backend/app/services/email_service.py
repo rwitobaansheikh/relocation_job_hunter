@@ -104,6 +104,8 @@ class EmailService:
             domain=job.company_domain,
             job_title=job.title,
             limit=settings.max_emails_per_company,
+            job_url=job.url or "",
+            min_contacts=settings.min_emails_per_company,
         )
         # Automation passes a per-company cap so a single send can't exceed the
         # user's per-domain limit.
