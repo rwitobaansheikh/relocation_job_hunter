@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     database_url: str = "sqlite:///./job_hunter.db"
     max_jobs_per_search: int = 100
-    max_emails_per_company: int = 5
+    max_emails_per_company: int = 6
     job_age_hours: int = 48
     uploads_dir: str = "uploads"
     generated_dir: str = "generated"

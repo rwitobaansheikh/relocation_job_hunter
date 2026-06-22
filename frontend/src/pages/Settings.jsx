@@ -27,7 +27,6 @@ export default function Settings() {
           smtp_from: s.smtp_from || '',
           smtp_password: '',
           gemini_api_key: '',
-          hunter_api_key: '',
         })
       })
       .catch((err) => setMessage({ type: 'error', text: err.message }))
@@ -42,10 +41,9 @@ export default function Settings() {
       const payload = { ...form }
       if (!payload.smtp_password) delete payload.smtp_password
       if (!payload.gemini_api_key) delete payload.gemini_api_key
-      if (!payload.hunter_api_key) delete payload.hunter_api_key
       const updated = await api.updateSettings(payload)
       setSettings(updated)
-      setForm((f) => ({ ...f, smtp_password: '', gemini_api_key: '', hunter_api_key: '' }))
+      setForm((f) => ({ ...f, smtp_password: '', gemini_api_key: '' }))
       setMessage({ type: 'success', text: 'Settings saved' })
     } catch (err) {
       setMessage({ type: 'error', text: err.message })
@@ -115,15 +113,11 @@ export default function Settings() {
         {showAdvanced && (
           <div style={{ marginTop: '1rem' }}>
             <p className="muted" style={{ marginBottom: '1rem' }}>
-              Optional. The app uses a local Ollama LLM by default. These overrides only apply if the server is set to cloud mode (<code>LLM_PROVIDER=gemini</code>) or for Hunter.io contact lookup.
+              Optional. The app uses a local Ollama LLM by default. This override only applies if the server is set to cloud mode (<code>LLM_PROVIDER=gemini</code>).
             </p>
             <div className="form-group">
               <label>Gemini API key (cloud mode only) {settings.gemini_override_set && <span className="muted">(set)</span>}</label>
               <input type="password" value={form.gemini_api_key} onChange={(e) => set('gemini_api_key', e.target.value)} placeholder="leave blank to keep / use shared" />
-            </div>
-            <div className="form-group">
-              <label>Hunter.io API key {settings.hunter_override_set && <span className="muted">(set)</span>}</label>
-              <input type="password" value={form.hunter_api_key} onChange={(e) => set('hunter_api_key', e.target.value)} placeholder="leave blank to keep / use shared" />
             </div>
           </div>
         )}

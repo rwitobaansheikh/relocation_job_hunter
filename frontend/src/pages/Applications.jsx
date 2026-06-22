@@ -157,7 +157,7 @@ export default function Applications() {
       return
     }
     setExpandedContacts(appId)
-    // Fetch (or re-fetch) the contacts for this job from Hunter.io.
+    // Fetch recruiting contacts via the built-in email scraper.
     setLoadingContacts(appId)
     try {
       const contacts = await api.getContacts(appId)
@@ -351,7 +351,7 @@ export default function Applications() {
               {expandedContacts === app.id && (
                 <div className="email-records">
                   <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem' }}>
-                    Outreach contacts for {app.job?.company} (via Hunter.io)
+                    Outreach contacts for {app.job?.company}
                   </div>
                   {loadingContacts === app.id ? (
                     <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Searching for contacts…</p>

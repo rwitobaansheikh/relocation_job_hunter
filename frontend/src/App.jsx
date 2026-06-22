@@ -16,6 +16,7 @@ import Billing from './pages/Billing'
 import Settings from './pages/Settings'
 import Feedback from './pages/Feedback'
 import Admin from './pages/Admin'
+import RecruitingEmails from './pages/RecruitingEmails'
 
 function PlanBadge() {
   const [billing, setBilling] = useState(null)
@@ -49,6 +50,7 @@ function ProtectedLayout() {
           <NavLink to="/app/profile">Profile & Uploads</NavLink>
           <NavLink to="/app/jobs">Search Jobs</NavLink>
           <NavLink to="/app/applications">Applications</NavLink>
+          <NavLink to="/app/recruiting-emails">Email Finder</NavLink>
           <NavLink to="/app/automation">Automation</NavLink>
           <NavLink to="/app/billing">Plan & Billing</NavLink>
           <NavLink to="/app/settings">Settings</NavLink>
@@ -91,6 +93,7 @@ export default function App() {
         <Route path="profile" element={<Profile />} />
         <Route path="jobs" element={<Jobs />} />
         <Route path="applications" element={<Applications />} />
+        <Route path="recruiting-emails" element={<RecruitingEmails />} />
         <Route path="automation" element={<Automation />} />
         <Route path="billing" element={<Billing />} />
         <Route path="settings" element={<Settings />} />
