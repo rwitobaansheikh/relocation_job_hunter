@@ -557,13 +557,20 @@ def add_manual_job(
         .first()
     )
     if not app:
+        match_score = int(min(max(round(score), 0), 100))
         app = JobApplication(
             user_profile_id=profile.id,
             job_id=job_record.id,
             status="discovered",
+            ai_match_score=match_score,
         )
         db.add(app)
         incr_usage(db, profile.id, "manual")
+    else:
+        match_score = int(min(max(round(score), 0), 100))
+        prev = app.ai_match_score or 0
+        if match_score > prev:
+            app.ai_match_score = match_score
     db.commit()
 
     return (
@@ -580,6 +587,7 @@ def add_manual_job(
 @router.get("/applications", response_model=list[JobApplicationResponse])
 def list_applications(
     status: Optional[str] = None,
+    sort: Optional[str] = None,
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
@@ -590,6 +598,11 @@ def list_applications(
     )
     if status:
         query = query.filter(JobApplication.status == status)
+    if sort == "match":
+        return query.order_by(
+            JobApplication.ai_match_score.desc(),
+            JobApplication.created_at.desc(),
+        ).all()
     return query.order_by(JobApplication.created_at.desc()).all()
 
 

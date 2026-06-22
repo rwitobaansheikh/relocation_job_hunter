@@ -1,7 +1,7 @@
 import HelpButton from './HelpButton'
 
 /**
- * Opens the job listing in a new tab and optionally marks the application as applied.
+ * Opens the job listing in a new tab. The parent page should confirm whether the user applied.
  */
 export default function ApplyOnSiteButton({
   jobUrl,

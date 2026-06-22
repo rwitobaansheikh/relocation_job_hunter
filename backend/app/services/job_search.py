@@ -304,6 +304,8 @@ class JobSearchService:
             db.add(job_record)
             db.flush()
 
+        match_score = int(min(max(round(score), 0), 100))
+
         app_exists = (
             db.query(JobApplication)
             .filter(
@@ -318,9 +320,14 @@ class JobSearchService:
                     user_profile_id=user_profile_id,
                     job_id=job_record.id,
                     status="discovered",
+                    ai_match_score=match_score,
                 )
             )
             stats["jobs_stored"] += 1
+        else:
+            prev = app_exists.ai_match_score or 0
+            if match_score > prev:
+                app_exists.ai_match_score = match_score
 
         db.commit()
 
@@ -331,6 +338,7 @@ class JobSearchService:
                 "company": job.company,
                 "location": job.location,
                 "url": job.url,
+                "match_score": match_score,
             },
             "stats": stats,
         }

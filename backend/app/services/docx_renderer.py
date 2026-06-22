@@ -326,6 +326,82 @@ def strip_cover_letter_header(body_text: str, name: str, contact: dict) -> str:
     return trimmed or text
 
 
+def strip_cover_letter_footer(body_text: str, name: str, contact: dict) -> str:
+    """Remove a trailing name/contact block when the LLM repeats the footer."""
+    text = (body_text or "").strip()
+    if not text:
+        return text
+
+    lines = text.splitlines()
+    email = (contact.get("email") or "").strip().lower()
+    phone_digits = re.sub(r"\D", "", contact.get("phone") or "")
+    name_key = (name or "").strip().lower()
+
+    peel_from = len(lines)
+    for index in range(len(lines) - 1, -1, -1):
+        stripped = lines[index].strip()
+        if not stripped:
+            peel_from = index
+            continue
+
+        plain = re.sub(r"^[#*\s]+", "", stripped).strip()
+        low = plain.lower()
+
+        if re.match(r"^(thanks|best regards|kind regards|sincerely|warm regards)", low):
+            break
+
+        if name_key and low == name_key:
+            peel_from = index
+            continue
+
+        if email and email in low:
+            peel_from = index
+            continue
+
+        if phone_digits and len(phone_digits) >= 7 and phone_digits[-7:] in re.sub(r"\D", "", low):
+            peel_from = index
+            continue
+
+        if "linkedin.com" in low:
+            peel_from = index
+            continue
+
+        if plain.count("|") >= 2:
+            peel_from = index
+            continue
+
+        break
+
+    trimmed = "\n".join(lines[:peel_from]).strip()
+    return trimmed or text
+
+
+def _reduce_hyphens(text: str) -> str:
+    """Replace hyphenated compounds in prose (not emails/URLs) for a natural tone."""
+    lines_out: list[str] = []
+    for line in text.splitlines():
+        if re.search(r"[@:/]|linkedin\.com|\+?\d{7,}", line, re.I):
+            lines_out.append(line)
+            continue
+        lines_out.append(re.sub(r"\b([a-z]{3,})-([a-z]{3,})\b", r"\1 \2", line, flags=re.I))
+    return "\n".join(lines_out)
+
+
+def _append_cover_letter_footer(doc: Document, name: str, contact: dict) -> None:
+    if name:
+        name_p = doc.add_paragraph(name)
+        for run in name_p.runs:
+            _set_run_font(run)
+
+    for key in ("phone", "email", "linkedin", "location"):
+        value = (contact.get(key) or "").strip()
+        if not value:
+            continue
+        line_p = doc.add_paragraph(value)
+        for run in line_p.runs:
+            _set_run_font(run)
+
+
 def render_resume_docx(data: dict, out_path: str) -> bool:
     """Render structured resume JSON to Word — CV360 ATS layout."""
     try:
@@ -469,21 +545,6 @@ def render_cover_letter_docx(name: str, contact: dict, body_text: str, out_path:
         doc = Document()
         _configure_page(doc)
 
-        if name:
-            header = doc.add_paragraph()
-            header_run = header.add_run(name)
-            _set_run_font(header_run, size_pt=14, bold=True)
-
-        contact_bits: list[str] = []
-        for key in ("email", "phone", "linkedin", "location"):
-            value = (contact.get(key) or "").strip()
-            if value:
-                contact_bits.append(value)
-        if contact_bits:
-            contact_p = doc.add_paragraph(" | ".join(contact_bits))
-            for run in contact_p.runs:
-                _set_run_font(run)
-
         cleaned = re.sub(
             r"^```[a-zA-Z]*\s*\n(.*?)\n?```$",
             r"\1",
@@ -491,7 +552,10 @@ def render_cover_letter_docx(name: str, contact: dict, body_text: str, out_path:
             flags=re.DOTALL,
         )
         cleaned = strip_cover_letter_header(cleaned.strip(), name, contact)
+        cleaned = strip_cover_letter_footer(cleaned, name, contact)
+        cleaned = _reduce_hyphens(cleaned)
         _plain_paragraphs_from_text(doc, cleaned)
+        _append_cover_letter_footer(doc, name, contact)
 
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         doc.save(out_path)

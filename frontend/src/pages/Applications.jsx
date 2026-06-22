@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import ApplyOnSiteButton from '../components/ApplyOnSiteButton'
+import DidYouApplyModal from '../components/DidYouApplyModal'
 import JobDescription from '../components/JobDescription'
 import HelpButton from '../components/HelpButton'
 import OnboardingGuide from '../components/OnboardingGuide'
@@ -51,9 +52,11 @@ export default function Applications() {
   const { profile } = useProfile()
   const [applications, setApplications] = useState([])
   const [filter, setFilter] = useState('')
+  const [sortBy, setSortBy] = useState('')
   const [loading, setLoading] = useState(true)
   const [actionMsg, setActionMsg] = useState(null)
   const [busy, setBusy] = useState(null)
+  const [applyPrompt, setApplyPrompt] = useState(null)
   const [expandedAnalysis, setExpandedAnalysis] = useState(null)
   const [expandedDesc, setExpandedDesc] = useState(null)
   const [expandedDocs, setExpandedDocs] = useState(null)
@@ -72,13 +75,13 @@ export default function Applications() {
     if (!profile?.id) return
     setLoading(true)
     try {
-      const apps = await api.getApplications(filter || undefined)
+      const apps = await api.getApplications(filter || undefined, sortBy || undefined)
       setApplications(apps)
     } catch (err) {
       console.error(err)
     }
     setLoading(false)
-  }, [profile, filter])
+  }, [profile, filter, sortBy])
 
   useEffect(() => { loadApps() }, [loadApps])
 
@@ -96,30 +99,41 @@ export default function Applications() {
     setBusy(null)
   }
 
-  const handleManualApply = async (app, markApplied = true) => {
+  const handleManualApply = (app) => {
     const url = app.job?.url
     if (!url) {
       setActionMsg({ type: 'error', text: 'This job has no listing URL. Add one via Jobs → Import link.' })
       return
     }
-    setBusy(`apply-${app.id}`)
     setActionMsg(null)
     window.open(url, '_blank', 'noopener,noreferrer')
+    setApplyPrompt(app)
+  }
+
+  const handleApplyConfirmed = async () => {
+    if (!applyPrompt) return
+    const app = applyPrompt
+    setApplyPrompt(null)
+    if (['applied', 'interview', 'replied'].includes(app.status)) {
+      return
+    }
+    setBusy(`apply-${app.id}`)
     try {
-      if (markApplied && !['applied', 'interview', 'replied'].includes(app.status)) {
-        await api.updateStatus(app.id, 'applied')
-        await loadApps()
-      }
+      await api.updateStatus(app.id, 'applied')
       setActionMsg({
         type: 'success',
-        text: markApplied
-          ? 'Job listing opened in a new tab. Status marked as applied — upload your tailored CV & cover letter there.'
-          : 'Job listing opened in a new tab.',
+        text: 'Marked as applied. Upload your tailored CV and cover letter if you have not already.',
       })
+      await loadApps()
     } catch (err) {
       setActionMsg({ type: 'error', text: err.message })
     }
     setBusy(null)
+  }
+
+  const handleApplyDismissed = () => {
+    setApplyPrompt(null)
+    setActionMsg({ type: 'info', text: 'Job listing opened in a new tab.' })
   }
 
   const handleBulkTailor = async () => {
@@ -355,6 +369,10 @@ export default function Applications() {
             <option key={s} value={s}>{s ? s.replace('_', ' ') : 'All statuses'}</option>
           ))}
         </select>
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="status-filter" aria-label="Sort applications">
+          <option value="">Newest first</option>
+          <option value="match">Highest match first</option>
+        </select>
         <div className="view-toggle">
           <button
             type="button"
@@ -420,7 +438,7 @@ export default function Applications() {
                     )}
                     <ApplyOnSiteButton
                       jobUrl={app.job?.url}
-                      onApply={() => handleManualApply(app, hasTailoredDocs(app))}
+                      onApply={() => handleManualApply(app)}
                       busy={busy === `apply-${app.id}`}
                       className={hasTailoredDocs(app) ? 'btn-primary' : 'btn-secondary'}
                       size="btn-sm"
@@ -512,7 +530,7 @@ export default function Applications() {
                 )}
                 <ApplyOnSiteButton
                   jobUrl={app.job?.url}
-                  onApply={() => handleManualApply(app, hasTailoredDocs(app))}
+                  onApply={() => handleManualApply(app)}
                   busy={busy === `apply-${app.id}`}
                   className="btn-primary"
                   label={hasTailoredDocs(app) ? '4. Apply on job site' : 'View job listing'}
@@ -544,6 +562,14 @@ export default function Applications() {
           ))}
         </div>
       )}
+
+      <DidYouApplyModal
+        open={Boolean(applyPrompt)}
+        jobTitle={applyPrompt?.job?.title}
+        company={applyPrompt?.job?.company}
+        onYes={handleApplyConfirmed}
+        onNo={handleApplyDismissed}
+      />
     </div>
   )
 }

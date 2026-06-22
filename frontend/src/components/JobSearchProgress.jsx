@@ -74,7 +74,10 @@ export default function JobSearchProgress({ progress, onStop, stopping, running 
             {progress.recentJobs.map((job, i) => (
               <li key={`${job.url || job.title}-${i}`}>
                 <strong>{job.title}</strong>
-                <span className="muted"> · {job.company}{job.location ? ` · ${job.location}` : ''}</span>
+                <span className="muted">
+                  {' · '}{job.company}{job.location ? ` · ${job.location}` : ''}
+                  {job.match_score > 0 ? ` · Match ${job.match_score}/100` : ''}
+                </span>
               </li>
             ))}
           </ul>

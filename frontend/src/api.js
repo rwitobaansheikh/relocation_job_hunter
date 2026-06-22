@@ -143,9 +143,10 @@ export const api = {
     request('/jobs/manual', { method: 'POST', body: JSON.stringify(payload) }),
 
   // --- Applications ---
-  getApplications: (status) => {
+  getApplications: (status, sort) => {
     const params = new URLSearchParams()
     if (status) params.set('status', status)
+    if (sort) params.set('sort', sort)
     const qs = params.toString()
     return request(`/applications${qs ? `?${qs}` : ''}`)
   },

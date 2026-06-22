@@ -51,10 +51,34 @@ def _sort_resume_sections(data: dict) -> dict:
 
 _GEMINI_PACE_SECONDS = 2.5
 _BATCH_PACE_SECONDS = 5.0
-_AI_FAILURE_MSG = (
-    "AI tailoring failed — the local LLM may be offline or overloaded. "
-    "Ensure Ollama is running and the configured model is pulled, then retry."
-)
+_TAILOR_ATTEMPTS = 3
+_TAILOR_RETRY_DELAY = 2.0
+
+
+def _ai_failure_message() -> str:
+    provider = (settings.llm_provider or "ollama").strip().lower()
+    if provider == "gemini":
+        return (
+            "Document tailoring failed after several attempts. "
+            "The AI service may be busy or rate-limited — wait a minute and try again."
+        )
+    return (
+        "Document tailoring failed after several attempts. "
+        "Check that Ollama is running and the configured model is available, then try again."
+    )
+
+
+def _should_retry_tailor_error(exc: ValueError) -> bool:
+    msg = str(exc).lower()
+    non_retry = (
+        "not found",
+        "api key",
+        "no cv text",
+        "local llm not configured",
+        "failed to render",
+        "re-upload",
+    )
+    return not any(phrase in msg for phrase in non_retry)
 
 
 def _strip_code_fences(text: str) -> str:
@@ -133,6 +157,25 @@ class DocumentGenerator:
         self.analyzer = JobAnalyzer()
 
     async def tailor_for_application(self, db: Session, application_id: int) -> JobApplication:
+        last_error: ValueError | None = None
+        for attempt in range(_TAILOR_ATTEMPTS):
+            try:
+                return await self._tailor_for_application_once(db, application_id)
+            except ValueError as exc:
+                last_error = exc
+                if not _should_retry_tailor_error(exc) or attempt >= _TAILOR_ATTEMPTS - 1:
+                    raise
+                logger.warning(
+                    "Tailor attempt %s/%s failed for application %s: %s",
+                    attempt + 1,
+                    _TAILOR_ATTEMPTS,
+                    application_id,
+                    exc,
+                )
+                await asyncio.sleep(_TAILOR_RETRY_DELAY * (attempt + 1))
+        raise ValueError(_ai_failure_message()) from last_error
+
+    async def _tailor_for_application_once(self, db: Session, application_id: int) -> JobApplication:
         application = db.query(JobApplication).filter(JobApplication.id == application_id).first()
         if not application:
             raise ValueError(f"Application {application_id} not found")
@@ -178,7 +221,7 @@ class DocumentGenerator:
                 "Tailored CV for application %s unusable (AI empty or truncated).",
                 application_id,
             )
-            raise ValueError(_AI_FAILURE_MSG)
+            raise ValueError(_ai_failure_message())
 
         cv_data = self._apply_profile_identity(cv_data, profile, cv_text)
         cv_data = _sort_resume_sections(cv_data)
@@ -191,7 +234,7 @@ class DocumentGenerator:
                 "Tailored cover letter for application %s unusable (AI empty or truncated).",
                 application_id,
             )
-            raise ValueError(_AI_FAILURE_MSG)
+            raise ValueError(_ai_failure_message())
 
         cl_docx = out_dir / document_filename(profile.full_name, job.title, "Cover-Letter")
         contact = self._contact(profile)
@@ -416,10 +459,10 @@ IMPROVEMENT SUGGESTIONS (address truthfully): {gaps_text}
     async def _generate_cover_letter(
         self, profile: UserProfile, job, baseline: str, api_key: str | None = None
     ) -> str:
-        prompt = f"""Write a tailored cover letter for this job application. Use the baseline as a STYLE and FORMAT reference (match its tone, structure, and layout).
+        prompt = f"""Write a tailored cover letter for this job application. Use the baseline as a STYLE and FORMAT reference (match its tone and paragraph flow).
 Express genuine interest in relocation and the specific role. Keep it professional and concise (200-320 words).
 
-BASELINE COVER LETTER (mirror its format):
+BASELINE COVER LETTER (mirror its tone, not its header/contact layout):
 {baseline[:3000]}
 
 APPLICANT: {profile.full_name}
@@ -432,12 +475,14 @@ Description: {job.description[:2000]}
 RELOCATION KEYWORDS IN JOB: {job.relocation_keywords}
 
 FORMATTING RULES (critical):
-- Do NOT include your name, email, phone, LinkedIn, or address at the top — the Word template adds a professional header automatically.
+- Do NOT include your name, email, phone, LinkedIn, or location anywhere — a contact footer is added automatically when the document is exported.
+- Do NOT add a letterhead or address block at the top. Start directly with the greeting.
 - Output clean Markdown, NOT one block of text.
 - Separate every paragraph with a blank line.
 - Open with a greeting line (e.g. "Hi hiring team at {job.company},") followed by a blank line.
-- 2-3 short body paragraphs, each separated by a blank line.
-- Close with "Thanks for considering my application," then on a new line "Best regards," then on a new line "{profile.full_name}".
+- Write 2-3 short body paragraphs, each separated by a blank line.
+- Close with "Thanks for considering my application," then on a new line "Best regards," — stop there (no name or contact details after the sign-off).
+- Avoid hyphenated compound words (write "next generation" not "next-generation", "scale up" not "scale-up") so the letter reads naturally human.
 - Do NOT wrap the output in code fences or backticks.
 
 Output the cover letter only as Markdown."""
