@@ -4,6 +4,8 @@ import { api } from './api'
 import { useAuth } from './AuthContext'
 import { useTheme } from './ThemeContext'
 import { ProfileProvider } from './ProfileContext'
+import { JobSearchProvider, useJobSearch } from './JobSearchContext'
+import GlobalJobSearchStatus from './components/GlobalJobSearchStatus'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -36,19 +38,15 @@ function PlanBadge() {
   )
 }
 
-function ProtectedLayout() {
-  const { user, loading, logout } = useAuth()
+function AppShell({ user, logout }) {
   const { theme, toggleTheme } = useTheme()
+  const { searching } = useJobSearch()
   const [navOpen, setNavOpen] = useState(false)
 
   const closeNav = () => setNavOpen(false)
 
-  if (loading) return <div className="layout"><main className="main"><p>Loading...</p></main></div>
-  if (!user) return <Navigate to="/login" replace />
-
   return (
-    <ProfileProvider>
-      <div className="layout">
+    <div className="layout">
         <button
           type="button"
           className="mobile-nav-toggle"
@@ -76,7 +74,10 @@ function ProtectedLayout() {
           </div>
           <NavLink to="/app" end onClick={closeNav}>Dashboard</NavLink>
           <NavLink to="/app/profile" onClick={closeNav}>Profile & Uploads</NavLink>
-          <NavLink to="/app/jobs" onClick={closeNav}>Search Jobs</NavLink>
+          <NavLink to="/app/jobs" onClick={closeNav} className={searching ? 'nav-link-searching' : undefined}>
+            Search Jobs
+            {searching && <span className="nav-search-pulse" title="Search in progress" />}
+          </NavLink>
           <NavLink to="/app/applications" onClick={closeNav}>Applications</NavLink>
           <NavLink to="/app/automation" onClick={closeNav}>
             Automation <span className="nav-soon">Soon</span>
@@ -112,10 +113,25 @@ function ProtectedLayout() {
         </nav>
         <main className="main">
           <PlanGate>
+            <GlobalJobSearchStatus />
             <Outlet />
           </PlanGate>
         </main>
       </div>
+  )
+}
+
+function ProtectedLayout() {
+  const { user, loading, logout } = useAuth()
+
+  if (loading) return <div className="layout"><main className="main"><p>Loading...</p></main></div>
+  if (!user) return <Navigate to="/login" replace />
+
+  return (
+    <ProfileProvider>
+      <JobSearchProvider>
+        <AppShell user={user} logout={logout} />
+      </JobSearchProvider>
     </ProfileProvider>
   )
 }

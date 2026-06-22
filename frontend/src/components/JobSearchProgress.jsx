@@ -9,38 +9,46 @@ function formatElapsed(ms) {
   return `${sec}s`
 }
 
-export default function JobSearchProgress({ progress, onStop, stopping }) {
+export default function JobSearchProgress({ progress, onStop, stopping, running = true }) {
   const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {
-    if (!progress?.startedAt) return undefined
+    if (!progress?.startedAt || !running) return undefined
     const tick = () => setElapsed(Date.now() - progress.startedAt)
     tick()
     const id = window.setInterval(tick, 1000)
     return () => window.clearInterval(id)
-  }, [progress?.startedAt])
+  }, [progress?.startedAt, running])
 
   if (!progress) return null
 
   const stats = progress.stats || {}
 
   return (
-    <div className="card job-search-progress" role="status" aria-live="polite">
+    <div className={`card job-search-progress${running ? '' : ' job-search-progress--done'}`} role="status" aria-live="polite">
       <div className="job-search-progress__header">
-        <div className="job-search-progress__spinner" aria-hidden="true" />
+        {running ? (
+          <div className="job-search-progress__spinner" aria-hidden="true" />
+        ) : (
+          <div className="job-search-progress__done-icon" aria-hidden="true">✓</div>
+        )}
         <div className="job-search-progress__headline">
-          <strong>Search in progress</strong>
-          <span className="muted job-search-progress__elapsed">{formatElapsed(elapsed)}</span>
+          <strong>{running ? 'Search in progress' : 'Search finished'}</strong>
+          {(running || progress.startedAt) && (
+            <span className="muted job-search-progress__elapsed">{formatElapsed(elapsed)}</span>
+          )}
         </div>
-        <HelpButton
-          className="btn-secondary btn-sm"
-          onClick={onStop}
-          disabled={stopping}
-          title="Stop search"
-          help="Stops the current job search. Jobs already saved stay in Applications."
-        >
-          {stopping ? 'Stopping…' : 'Stop search'}
-        </HelpButton>
+        {running && (
+          <HelpButton
+            className="btn-secondary btn-sm"
+            onClick={onStop}
+            disabled={stopping}
+            title="Stop search"
+            help="Stops the current job search. Jobs already saved stay in Applications."
+          >
+            {stopping ? 'Stopping…' : 'Stop search'}
+          </HelpButton>
+        )}
       </div>
 
       <p className="job-search-progress__message">{progress.message || 'Searching for matching roles…'}</p>

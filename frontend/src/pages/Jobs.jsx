@@ -1,18 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api'
-import JobSearchProgress from '../components/JobSearchProgress'
 import SearchCriteriaPanel, { SEARCH_CRITERIA_KEY } from '../components/SearchCriteriaPanel'
 import HelpButton from '../components/HelpButton'
 import { POSTED_OPTIONS, SENIORITY_OPTIONS, WORK_TYPE_OPTIONS } from '../constants/search'
 import { useProfile } from '../ProfileContext'
+import { useJobSearch } from '../JobSearchContext'
 
 export default function Jobs() {
   const { profile } = useProfile()
-  const [searching, setSearching] = useState(false)
-  const [stopping, setStopping] = useState(false)
-  const [searchProgress, setSearchProgress] = useState(null)
-  const searchAbortRef = useRef(null)
-  const [results, setResults] = useState(null)
+  const {
+    searching,
+    startSearch,
+    results,
+    error: searchError,
+    statusMessage,
+  } = useJobSearch()
   const [error, setError] = useState(null)
   const [criteriaMsg, setCriteriaMsg] = useState(null)
 
@@ -205,167 +207,29 @@ export default function Jobs() {
     setCriteriaMsg({ type: 'success', text: 'Filters updated from suggestions. Click Start Job Search when ready.' })
   }
 
-  const stopSearch = () => {
-    if (!searchAbortRef.current) return
-    setStopping(true)
-    searchAbortRef.current.abort()
-  }
+  useEffect(() => {
+    if (statusMessage) setCriteriaMsg(statusMessage)
+  }, [statusMessage])
 
-  const handleSearch = async () => {
+  useEffect(() => {
+    if (searchError) setError(searchError)
+  }, [searchError])
+
+  const handleSearch = () => {
     if (!profile?.cv_path) {
       setError('Upload your CV before searching')
       return
     }
-
-    const controller = new AbortController()
-    searchAbortRef.current = controller
-    setSearching(true)
-    setStopping(false)
     setError(null)
-    setResults(null)
-
-    const startedAt = Date.now()
-    let sessionTotals = { jobs_found: 0, jobs_stored: 0, jobs_filtered: 0 }
-    let recentJobs = []
-
-    const updateProgress = (patch) => {
-      setSearchProgress((prev) => ({
-        startedAt,
-        message: patch.message ?? prev?.message ?? 'Searching…',
-        role: patch.role ?? prev?.role,
-        location: patch.location ?? prev?.location,
-        page: patch.page ?? prev?.page,
-        stats: patch.stats ?? prev?.stats ?? sessionTotals,
-        recentJobs: patch.recentJobs ?? prev?.recentJobs ?? recentJobs,
-      }))
-    }
-
-    updateProgress({
-      message: 'Preparing search…',
-      stats: { jobs_found: 0, jobs_stored: 0, jobs_filtered: 0 },
-      recentJobs: [],
+    startSearch({
+      seniority,
+      workTypes,
+      postedWithin,
+      locations,
+      searchRoles,
+      minSalary,
+      maxSalary,
     })
-
-    try {
-      const locList = locations
-        .split(',')
-        .map((l) => l.trim())
-        .filter(Boolean)
-
-      if (locList.length === 0) locList.push('')
-
-      let stopped = false
-
-      for (const loc of locList) {
-        if (controller.signal.aborted) {
-          stopped = true
-          break
-        }
-
-        const payload = {
-          max_jobs: 100,
-          seniority_levels: seniority,
-          posted_within_hours: Number(postedWithin),
-          location: loc,
-          work_types: workTypes,
-        }
-        if (searchRoles.length) payload.roles = searchRoles
-        if (minSalary) payload.min_salary = Number(minSalary)
-        if (maxSalary) payload.max_salary = Number(maxSalary)
-
-        if (locList.length > 1) {
-          updateProgress({
-            message: `Searching location: ${loc || 'default profile locations'}…`,
-            location: loc,
-          })
-        }
-
-        const finalEvent = await api.streamSearchJobs(
-          payload,
-          (event) => {
-            if (event.type === 'progress' || event.type === 'status') {
-              updateProgress({
-                message: event.message,
-                role: event.role,
-                location: event.location ?? loc,
-                page: event.page,
-                stats: {
-                  jobs_found: sessionTotals.jobs_found + (event.stats?.jobs_found ?? 0),
-                  jobs_stored: sessionTotals.jobs_stored + (event.stats?.jobs_stored ?? 0),
-                  jobs_filtered: sessionTotals.jobs_filtered + (event.stats?.jobs_filtered ?? 0),
-                },
-              })
-              return
-            }
-
-            if (event.type === 'job' && event.job) {
-              recentJobs = [event.job, ...recentJobs.filter((j) => j.url !== event.job.url)].slice(0, 5)
-              const liveStats = {
-                jobs_found: sessionTotals.jobs_found + (event.stats?.jobs_found ?? 0),
-                jobs_stored: sessionTotals.jobs_stored + (event.stats?.jobs_stored ?? 0),
-                jobs_filtered: sessionTotals.jobs_filtered + (event.stats?.jobs_filtered ?? 0),
-              }
-              updateProgress({
-                message: `Saved: ${event.job.title} at ${event.job.company}`,
-                stats: liveStats,
-                recentJobs,
-              })
-              setResults(liveStats)
-              return
-            }
-
-            if (event.type === 'done' && event.stats) {
-              sessionTotals = {
-                jobs_found: sessionTotals.jobs_found + event.stats.jobs_found,
-                jobs_stored: sessionTotals.jobs_stored + event.stats.jobs_stored,
-                jobs_filtered: sessionTotals.jobs_filtered + event.stats.jobs_filtered,
-              }
-              updateProgress({
-                message: event.message || 'Location search complete.',
-                stats: sessionTotals,
-              })
-              setResults({ ...sessionTotals })
-              return
-            }
-
-            if (event.type === 'cancelled') {
-              updateProgress({
-                message: event.message || 'Search stopped.',
-                stats: event.stats || sessionTotals,
-              })
-            }
-
-            if (event.type === 'error') {
-              throw new Error(event.error || 'Search failed')
-            }
-          },
-          { signal: controller.signal },
-        )
-
-        if (finalEvent?.type === 'cancelled' || controller.signal.aborted) {
-          stopped = true
-          break
-        }
-      }
-
-      setResults({ ...sessionTotals })
-      if (stopped) {
-        setCriteriaMsg({ type: 'info', text: `Search stopped. ${sessionTotals.jobs_stored} job(s) saved to Applications.` })
-      } else {
-        setCriteriaMsg({ type: 'success', text: `Search completed. ${sessionTotals.jobs_stored} job(s) saved — open Applications to review.` })
-      }
-    } catch (err) {
-      if (err.name === 'AbortError' || controller.signal.aborted) {
-        setCriteriaMsg({ type: 'info', text: 'Search stopped.' })
-      } else {
-        setError(err.message)
-      }
-    }
-
-    setSearching(false)
-    setStopping(false)
-    setSearchProgress(null)
-    searchAbortRef.current = null
   }
 
   const canSuggest = profile?.cv_path && profile?.baseline_cover_letter_path
@@ -631,19 +495,11 @@ export default function Jobs() {
           onClick={handleSearch}
           disabled={searching}
           title="Start Job Search"
-          help="Runs a search across LinkedIn and other boards. Progress appears below while the query runs — you can stop it anytime."
+          help="Runs a search across LinkedIn and other boards. Progress stays visible if you switch pages — you can stop it anytime."
         >
           {searching ? 'Searching…' : 'Start Job Search'}
         </HelpButton>
       </div>
-
-      {(searching || searchProgress) && (
-        <JobSearchProgress
-          progress={searchProgress}
-          onStop={stopSearch}
-          stopping={stopping}
-        />
-      )}
 
       {error && <div className="alert alert-error">{error}</div>}
 
