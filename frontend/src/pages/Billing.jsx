@@ -27,15 +27,20 @@ export default function Billing() {
     const params = new URLSearchParams(window.location.search)
     const sessionId = params.get('session_id')
     const status = params.get('status')
-    load(sessionId)
-    if (status === 'success') {
-      setMessage({ type: 'success', text: 'Subscription updated. Thank you!' })
-      window.dispatchEvent(new CustomEvent('plan:updated'))
-      window.history.replaceState({}, '', window.location.pathname)
-    } else if (status === 'cancel') {
-      setMessage({ type: 'info', text: 'Checkout canceled.' })
-      window.history.replaceState({}, '', window.location.pathname)
+    
+    const init = async () => {
+      await load(sessionId)
+      if (status === 'success') {
+        setMessage({ type: 'success', text: 'Subscription updated. Thank you!' })
+        window.dispatchEvent(new CustomEvent('plan:updated'))
+        window.history.replaceState({}, '', window.location.pathname)
+      } else if (status === 'cancel') {
+        setMessage({ type: 'info', text: 'Checkout canceled.' })
+        window.history.replaceState({}, '', window.location.pathname)
+      }
     }
+    
+    init()
   }, [])
 
   const subscribe = async (tier) => {
