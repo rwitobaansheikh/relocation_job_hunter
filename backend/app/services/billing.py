@@ -91,6 +91,7 @@ def create_checkout_session(
         cancel_url=f"{base}/app/billing?status=cancel",
         metadata={"user_id": str(user.id), "tier": tier, "trial": str(with_trial).lower()},
         subscription_data=subscription_data,
+        client_reference_id=str(user.id),
     )
     return session["url"]
 
@@ -275,7 +276,7 @@ def _apply_subscription(
     if not tier:
         tier = metadata.get("tier")
 
-    if status in ("active", "trialing") and tier:
+    if status in ("active", "trialing", "incomplete") and tier:
         user.plan = tier
         # Stripe subscription replaces the internal signup trial.
         user.trial_end = None

@@ -91,10 +91,10 @@ def current_plan(user) -> str:
 
     # Stripe subscription is the source of truth once linked.
     if getattr(user, "stripe_subscription_id", ""):
-        if plan in PAID_PLANS and status in ("active", "trialing", "past_due"):
+        if plan in PAID_PLANS and status in ("active", "trialing", "past_due", "incomplete"):
             return plan
 
-    if plan in PAID_PLANS and status in ("active", "trialing"):
+    if plan in PAID_PLANS and status in ("active", "trialing", "incomplete"):
         return plan
 
     trial_end = getattr(user, "trial_end", None)
