@@ -401,12 +401,15 @@ def _apply_subscription(
     if not tier:
         tier = metadata.get("tier")
 
+    # Always clear the internal trial when a Stripe subscription is active so the
+    # user cannot be stuck on "trial" even if tier resolution fails.
+    if status in ("active", "trialing", "incomplete", "past_due"):
+        user.trial_end = None
+
     applied = False
     reason = ""
     if status in ("active", "trialing", "incomplete") and tier:
         user.plan = tier
-        # Stripe subscription replaces the internal signup trial.
-        user.trial_end = None
         applied = True
     elif status in ("canceled", "unpaid", "incomplete_expired"):
         user.plan = "expired"
@@ -546,10 +549,15 @@ def _apply_checkout_session(
 
     try:
         sub = client.Subscription.retrieve(sub_id)
+        # Only use user.plan as a tier_hint fallback if it is already a paid plan;
+        # passing "trial" would cause _apply_subscription to write plan="trial" back.
+        safe_tier_hint = tier_hint if tier_hint in PAID_PLANS else (
+            user.plan if user.plan in PAID_PLANS else None
+        )
         sub_result = _apply_subscription(
             db,
             sub,
-            tier_hint=tier_hint or user.plan,
+            tier_hint=safe_tier_hint,
             notify=True,
             payment_amount_cents=paid_cents,
             payment_currency=currency,
@@ -585,11 +593,13 @@ def sync_from_checkout_session(db: Session, user: User, session_id: str) -> bool
                 )
             _apply_checkout_session(db, session, user=user)
             db.refresh(user)
-            if user.stripe_subscription_id and current_plan(user) != "trial":
+            # Exit as soon as the plan is upgraded — don't wait for stripe_subscription_id
+            # to be populated (it may arrive via webhook after this redirect).
+            if current_plan(user) in PAID_PLANS:
                 return True
             if attempt < 4:
                 time.sleep(1.0)
-        return bool(user.stripe_subscription_id)
+        return current_plan(user) in PAID_PLANS
     except Exception as exc:
         logger.warning("Checkout session sync failed for user %s: %s", user.id, exc)
         return False

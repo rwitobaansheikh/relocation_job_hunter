@@ -55,12 +55,17 @@ def get_billing(
 
     session_id = request.query_params.get("session_id")
     if session_id:
+        # Post-checkout redirect: sync from the specific completed session.
         billing.sync_from_checkout_session(db, user, session_id)
-    billing.force_sync_user_from_stripe(db, user)
-    if current_plan(user) == "trial":
-        billing.force_sync_user_from_stripe(db, user)
 
+    # Re-fetch so we see any changes committed by the sync above.
     user = db.query(User).filter(User.id == user.id).first() or user
+
+    # Only hit the Stripe API for a full subscription search when the user is still
+    # on trial/expired — not on every billing page load for paid users.
+    if current_plan(user) in ("trial", "expired"):
+        billing.force_sync_user_from_stripe(db, user)
+        user = db.query(User).filter(User.id == user.id).first() or user
 
     plan = current_plan(user)
     limits = effective_limits(user)
