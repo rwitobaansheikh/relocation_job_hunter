@@ -7,6 +7,7 @@ mirrored onto the User row via webhooks so plan resolution is local + fast.
 
 import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import Any, Optional
 
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import User
+from app.services.plans import PAID_PLANS, current_plan
 
 logger = logging.getLogger(__name__)
 
@@ -171,16 +173,44 @@ def _resolve_user(
     *,
     customer_id: str | None = None,
     user_id: str | None = None,
+    client_reference_id: str | None = None,
 ) -> User | None:
     user = None
-    if user_id:
+    for raw_id in (user_id, client_reference_id):
+        if user or not raw_id:
+            continue
         try:
-            user = db.query(User).filter(User.id == int(user_id)).first()
+            user = db.query(User).filter(User.id == int(raw_id)).first()
         except (TypeError, ValueError):
             user = None
     if not user and customer_id:
         user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
     return user
+
+
+def _session_user_id(session: dict) -> str | None:
+    metadata = session.get("metadata") or {}
+    uid = metadata.get("user_id") or session.get("client_reference_id")
+    return str(uid) if uid else None
+
+
+def _checkout_is_complete(session: dict) -> bool:
+    return session.get("payment_status") in ("paid", "no_payment_required")
+
+
+def _session_belongs_to_user(session: dict, user: User) -> bool:
+    session_uid = _session_user_id(session)
+    if session_uid and session_uid != str(user.id):
+        return False
+    customer_id = _stripe_id(session.get("customer"))
+    if (
+        customer_id
+        and user.stripe_customer_id
+        and customer_id != user.stripe_customer_id
+        and session_uid != str(user.id)
+    ):
+        return False
+    return True
 
 
 def _schedule_system_email(to: str, subject: str, text: str, html: str | None) -> None:
@@ -315,23 +345,31 @@ def _apply_checkout_session(db: Session, session: dict) -> None:
     metadata = session.get("metadata") or {}
     tier_hint = metadata.get("tier")
     customer_id = _stripe_id(session.get("customer"))
-    user_id = metadata.get("user_id")
+    user_id = metadata.get("user_id") or session.get("client_reference_id")
 
-    user = _resolve_user(db, customer_id=customer_id or None, user_id=user_id)
+    user = _resolve_user(
+        db,
+        customer_id=customer_id or None,
+        user_id=user_id,
+        client_reference_id=session.get("client_reference_id"),
+    )
     if not user:
-        logger.warning("Checkout session for unknown user (customer=%s)", customer_id)
+        logger.warning(
+            "Checkout session for unknown user (customer=%s user_id=%s)",
+            customer_id,
+            user_id,
+        )
         return
 
     if customer_id:
         user.stripe_customer_id = customer_id
-        db.commit()
 
     sub_id = _stripe_id(session.get("subscription"))
-    if not sub_id:
-        return
+    if sub_id:
+        user.stripe_subscription_id = sub_id
 
     client = _client()
-    if not tier_hint:
+    if not tier_hint and session.get("id"):
         try:
             line_items = client.checkout.Session.list_line_items(session["id"], limit=1)
             if line_items.data:
@@ -339,20 +377,48 @@ def _apply_checkout_session(db: Session, session: dict) -> None:
         except Exception as exc:
             logger.warning("Could not read checkout line items: %s", exc)
 
-    sub = client.Subscription.retrieve(sub_id)
     payment_status = session.get("payment_status") or ""
     amount = session.get("amount_total")
     currency = session.get("currency") or "usd"
     paid_cents = amount if payment_status == "paid" and amount else None
 
-    _apply_subscription(
-        db,
-        sub,
-        tier_hint=tier_hint,
-        notify=True,
-        payment_amount_cents=paid_cents,
-        payment_currency=currency,
-    )
+    # Apply tier immediately from checkout metadata so the UI updates even if
+    # the Subscription object is not fully active yet (e.g. status incomplete).
+    if _checkout_is_complete(session) and tier_hint in PAID_PLANS:
+        user.plan = tier_hint
+        user.trial_end = None
+        if payment_status == "no_payment_required":
+            user.plan_status = "trialing"
+        elif payment_status == "paid":
+            user.plan_status = "active"
+        db.commit()
+        logger.info(
+            "Applied plan %s from checkout session for user %s (payment_status=%s)",
+            tier_hint,
+            user.id,
+            payment_status,
+        )
+
+    if not sub_id:
+        return
+
+    try:
+        sub = client.Subscription.retrieve(sub_id)
+        _apply_subscription(
+            db,
+            sub,
+            tier_hint=tier_hint,
+            notify=True,
+            payment_amount_cents=paid_cents,
+            payment_currency=currency,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Subscription retrieve after checkout failed for user %s sub %s: %s",
+            user.id,
+            sub_id,
+            exc,
+        )
 
 
 def _link_stripe_customer_by_email(db: Session, user: User) -> bool:
@@ -381,13 +447,21 @@ def sync_from_checkout_session(db: Session, user: User, session_id: str) -> bool
         return False
     try:
         client = _client()
-        session = client.checkout.Session.retrieve(session_id)
-        metadata = session.get("metadata") or {}
-        if str(metadata.get("user_id", "")) not in ("", str(user.id)):
-            logger.warning("Checkout session %s does not belong to user %s", session_id, user.id)
-            return False
-        _apply_checkout_session(db, session)
-        db.refresh(user)
+        for attempt in range(5):
+            session = client.checkout.Session.retrieve(session_id)
+            if not _session_belongs_to_user(session, user):
+                logger.warning(
+                    "Checkout session %s does not belong to user %s",
+                    session_id,
+                    user.id,
+                )
+                return False
+            _apply_checkout_session(db, session)
+            db.refresh(user)
+            if user.stripe_subscription_id and current_plan(user) != "trial":
+                return True
+            if attempt < 4:
+                time.sleep(1.0)
         return bool(user.stripe_subscription_id)
     except Exception as exc:
         logger.warning("Checkout session sync failed for user %s: %s", user.id, exc)

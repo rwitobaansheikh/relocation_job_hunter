@@ -58,9 +58,9 @@ def get_billing(
         billing.sync_from_checkout_session(db, user, session_id)
     else:
         billing.sync_user_subscription(db, user)
-    # Fallback: link Stripe customer by email if checkout/webhook did not persist IDs.
     if not user.stripe_subscription_id:
         billing.sync_user_subscription(db, user)
+    db.expire(user)
     db.refresh(user)
 
     plan = current_plan(user)

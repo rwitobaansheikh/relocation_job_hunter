@@ -88,17 +88,22 @@ def current_plan(user) -> str:
 
     plan = (getattr(user, "plan", "") or "").lower()
     status = (getattr(user, "plan_status", "") or "").lower()
+    stripe_sub = (getattr(user, "stripe_subscription_id", "") or "").strip()
+    paid_statuses = ("active", "trialing", "past_due", "incomplete")
 
-    # Stripe subscription is the source of truth once linked.
-    if getattr(user, "stripe_subscription_id", ""):
-        if plan in PAID_PLANS and status in ("active", "trialing", "past_due", "incomplete"):
+    # Stripe subscription replaces the internal signup trial — never show trial
+    # when a subscription is linked and in a billable state.
+    if stripe_sub and status in paid_statuses:
+        if plan in PAID_PLANS:
             return plan
+        # Plan column stale (sync lag) — treat as paid basic rather than trial.
+        return "basic"
 
-    if plan in PAID_PLANS and status in ("active", "trialing", "incomplete"):
+    if plan in PAID_PLANS and status in paid_statuses:
         return plan
 
     trial_end = getattr(user, "trial_end", None)
-    if trial_end and datetime.utcnow() < trial_end:
+    if not stripe_sub and trial_end and datetime.utcnow() < trial_end:
         return "trial"
     return "expired"
 

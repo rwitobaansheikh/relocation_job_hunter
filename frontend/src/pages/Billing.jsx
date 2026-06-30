@@ -8,38 +8,56 @@ export default function Billing() {
   const [busy, setBusy] = useState(null)
   const [message, setMessage] = useState(null)
 
-  const load = async (sessionId) => {
+  const load = async (sessionId, { afterCheckout = false } = {}) => {
     setLoading(true)
     try {
-      let billing = await api.getBilling(sessionId)
-      if (sessionId && billing?.plan === 'trial') {
-        await new Promise((resolve) => setTimeout(resolve, 1500))
+      const maxAttempts = afterCheckout ? 8 : 1
+      let billing = null
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         billing = await api.getBilling(sessionId)
+        const upgraded = billing?.has_stripe_subscription
+          || ['basic', 'standard', 'pro'].includes(billing?.plan)
+        if (!afterCheckout || upgraded || attempt === maxAttempts - 1) {
+          break
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000))
       }
       setData(billing)
+      return billing
     } catch (err) {
       setMessage({ type: 'error', text: err.message })
+      return null
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const sessionId = params.get('session_id')
     const status = params.get('status')
-    
+
     const init = async () => {
-      await load(sessionId)
+      const billing = await load(sessionId, { afterCheckout: status === 'success' })
       if (status === 'success') {
-        setMessage({ type: 'success', text: 'Subscription updated. Thank you!' })
-        window.dispatchEvent(new CustomEvent('plan:updated'))
+        const upgraded = billing?.has_stripe_subscription
+          || ['basic', 'standard', 'pro'].includes(billing?.plan)
+        if (upgraded) {
+          setMessage({ type: 'success', text: 'Subscription updated. Thank you!' })
+          window.dispatchEvent(new CustomEvent('plan:updated'))
+        } else {
+          setMessage({
+            type: 'info',
+            text: 'Payment received — your plan is syncing. Refresh in a moment if it still shows Trial.',
+          })
+        }
         window.history.replaceState({}, '', window.location.pathname)
       } else if (status === 'cancel') {
         setMessage({ type: 'info', text: 'Checkout canceled.' })
         window.history.replaceState({}, '', window.location.pathname)
       }
     }
-    
+
     init()
   }, [])
 
