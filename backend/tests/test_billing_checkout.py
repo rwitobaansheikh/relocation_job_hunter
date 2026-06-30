@@ -64,7 +64,7 @@ def test_apply_checkout_session_sets_paid_plan_immediately():
         client = mock_client.return_value
         client.Subscription.retrieve.return_value = sub
 
-        _apply_checkout_session(db, session)
+        _apply_checkout_session(db, session, user=user)
 
     assert user.plan == "basic"
     assert user.trial_end is None
@@ -81,6 +81,13 @@ def test_current_plan_never_shows_trial_when_stripe_linked():
     assert current_plan(user) == "basic"
 
 
+def test_current_plan_prefers_paid_plan_column():
+    user = FakeUser()
+    user.plan = "standard"
+    user.trial_end = datetime.utcnow() + timedelta(days=3)
+    assert current_plan(user) == "standard"
+
+
 def test_sync_from_checkout_session_retries_until_upgraded():
     user = FakeUser()
     db = MagicMock()
@@ -95,13 +102,17 @@ def test_sync_from_checkout_session_retries_until_upgraded():
         "payment_status": "paid",
     }
 
+    def _apply_side_effect(_db, _session, user=None):
+        target = user or FakeUser()
+        target.stripe_subscription_id = "sub_abc"
+        target.plan = "standard"
+        target.trial_end = None
+
     with patch("app.services.billing.is_configured", return_value=True), patch(
         "app.services.billing._client"
     ) as mock_client, patch(
         "app.services.billing._apply_checkout_session",
-        side_effect=lambda _db, _session: setattr(user, "stripe_subscription_id", "sub_abc")
-        or setattr(user, "plan", "standard")
-        or setattr(user, "trial_end", None),
+        side_effect=_apply_side_effect,
     ), patch("app.services.billing.time.sleep"):
         mock_client.return_value.checkout.Session.retrieve.return_value = session
         ok = sync_from_checkout_session(db, user, "cs_test_123")

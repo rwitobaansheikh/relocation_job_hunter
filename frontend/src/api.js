@@ -202,6 +202,7 @@ export const api = {
       : `/billing?_t=${Date.now()}`
     return request(url)
   },
+  syncBilling: () => request('/billing/sync', { method: 'POST' }),
   checkout: (tier) => request('/billing/checkout', { method: 'POST', body: JSON.stringify({ tier }) }),
   startTrialCheckout: () => request('/billing/trial-checkout', { method: 'POST' }),
   openPortal: () => request('/billing/portal', { method: 'POST' }),

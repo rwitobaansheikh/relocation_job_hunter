@@ -91,16 +91,13 @@ def current_plan(user) -> str:
     stripe_sub = (getattr(user, "stripe_subscription_id", "") or "").strip()
     paid_statuses = ("active", "trialing", "past_due", "incomplete")
 
-    # Stripe subscription replaces the internal signup trial — never show trial
-    # when a subscription is linked and in a billable state.
-    if stripe_sub and status in paid_statuses:
-        if plan in PAID_PLANS:
-            return plan
-        # Plan column stale (sync lag) — treat as paid basic rather than trial.
-        return "basic"
-
-    if plan in PAID_PLANS and status in paid_statuses:
+    # DB plan column set to a paid tier (e.g. checkout sync) — never show internal trial.
+    if plan in PAID_PLANS:
         return plan
+
+    # Stripe subscription linked — never show internal trial.
+    if stripe_sub and status in paid_statuses:
+        return "basic"
 
     trial_end = getattr(user, "trial_end", None)
     if not stripe_sub and trial_end and datetime.utcnow() < trial_end:

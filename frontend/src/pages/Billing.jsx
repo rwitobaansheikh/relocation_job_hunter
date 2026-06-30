@@ -38,17 +38,29 @@ export default function Billing() {
     const status = params.get('status')
 
     const init = async () => {
-      const billing = await load(sessionId, { afterCheckout: status === 'success' })
+      let billing = await load(sessionId, { afterCheckout: status === 'success' })
+
+      if (billing?.plan === 'trial' && billing?.stripe_configured) {
+        try {
+          billing = await api.syncBilling()
+          setData(billing)
+        } catch {
+          // keep prior billing payload
+        }
+      }
+
       if (status === 'success') {
         const upgraded = billing?.has_stripe_subscription
           || ['basic', 'standard', 'pro'].includes(billing?.plan)
+
+        window.dispatchEvent(new CustomEvent('plan:updated'))
+
         if (upgraded) {
           setMessage({ type: 'success', text: 'Subscription updated. Thank you!' })
-          window.dispatchEvent(new CustomEvent('plan:updated'))
         } else {
           setMessage({
             type: 'info',
-            text: 'Payment received — your plan is syncing. Refresh in a moment if it still shows Trial.',
+            text: 'Payment received — tap "Sync my plan" below if you still see Trial.',
           })
         }
         window.history.replaceState({}, '', window.location.pathname)
@@ -95,6 +107,29 @@ export default function Billing() {
       setMessage({ type: 'error', text: err.message })
       setBusy(null)
     }
+  }
+
+  const syncPlan = async () => {
+    setBusy('sync')
+    setMessage(null)
+    try {
+      const billing = await api.syncBilling()
+      setData(billing)
+      const upgraded = billing?.has_stripe_subscription
+        || ['basic', 'standard', 'pro'].includes(billing?.plan)
+      if (upgraded) {
+        setMessage({ type: 'success', text: 'Plan synced from Stripe.' })
+        window.dispatchEvent(new CustomEvent('plan:updated'))
+      } else {
+        setMessage({
+          type: 'info',
+          text: 'No active subscription found in Stripe for this account yet.',
+        })
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message })
+    }
+    setBusy(null)
   }
 
   if (loading) return <p>Loading...</p>
@@ -178,6 +213,19 @@ export default function Billing() {
               help="Opens the Stripe customer portal where you can update payment method, change plan, or cancel."
             >
               {busy === 'portal' ? 'Opening…' : 'Manage subscription'}
+            </HelpButton>
+          </div>
+        )}
+        {data.plan === 'trial' && data.stripe_configured && (
+          <div style={{ marginTop: '1rem' }}>
+            <HelpButton
+              className="btn-secondary"
+              onClick={syncPlan}
+              disabled={busy === 'sync'}
+              title="Sync my plan"
+              help="Pull your latest subscription from Stripe if you already paid but still see Trial."
+            >
+              {busy === 'sync' ? 'Syncing…' : 'Sync my plan'}
             </HelpButton>
           </div>
         )}

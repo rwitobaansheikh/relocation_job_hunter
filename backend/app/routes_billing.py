@@ -56,12 +56,11 @@ def get_billing(
     session_id = request.query_params.get("session_id")
     if session_id:
         billing.sync_from_checkout_session(db, user, session_id)
-    else:
-        billing.sync_user_subscription(db, user)
-    if not user.stripe_subscription_id:
-        billing.sync_user_subscription(db, user)
-    db.expire(user)
-    db.refresh(user)
+    billing.force_sync_user_from_stripe(db, user)
+    if current_plan(user) == "trial":
+        billing.force_sync_user_from_stripe(db, user)
+
+    user = db.query(User).filter(User.id == user.id).first() or user
 
     plan = current_plan(user)
     limits = effective_limits(user)
@@ -141,6 +140,18 @@ def checkout(
     except billing.BillingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     return CheckoutResponse(url=url)
+
+
+@billing_router.post("/sync", response_model=BillingResponse)
+def sync_billing(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Force-refresh subscription state from Stripe (use when UI is stuck on trial)."""
+    billing.force_sync_user_from_stripe(db, user)
+    user = db.query(User).filter(User.id == user.id).first() or user
+    return get_billing(request, user, db)
 
 
 @billing_router.post("/portal", response_model=CheckoutResponse)

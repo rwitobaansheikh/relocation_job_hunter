@@ -158,6 +158,31 @@ def _price_id_from_item(item: dict) -> Optional[str]:
     return None
 
 
+def _subscription_items(subscription: Any) -> list:
+    items = subscription.get("items") if hasattr(subscription, "get") else None
+    if items is None:
+        return []
+    if hasattr(items, "data"):
+        return list(items.data or [])
+    if isinstance(items, dict):
+        return items.get("data") or []
+    return []
+
+
+def _tier_from_line_item(item: dict) -> Optional[str]:
+    tier = _tier_from_price(_price_id_from_item(item))
+    if tier:
+        return tier
+    price = item.get("price")
+    if isinstance(price, dict):
+        for hint in (price.get("nickname") or "", price.get("lookup_key") or ""):
+            hint_lower = hint.lower()
+            for candidate in PAID_PLANS:
+                if candidate in hint_lower:
+                    return candidate
+    return None
+
+
 def _tier_from_price(price_id: Optional[str]) -> Optional[str]:
     if not price_id:
         return None
@@ -166,6 +191,31 @@ def _tier_from_price(price_id: Optional[str]) -> Optional[str]:
         if configured and configured == price_id:
             return tier
     return None
+
+
+def _stripe_customer_ids_for_user(user: User) -> list[str]:
+    """All Stripe customer IDs that may belong to this user (DB + email lookup)."""
+    seen: set[str] = set()
+    out: list[str] = []
+    if user.stripe_customer_id:
+        seen.add(user.stripe_customer_id)
+        out.append(user.stripe_customer_id)
+    if not is_configured():
+        return out
+    try:
+        client = _client()
+        for cust in client.Customer.list(email=user.email, limit=10).data or []:
+            cid = _stripe_id(cust)
+            if not cid or cid in seen:
+                continue
+            meta_uid = (cust.get("metadata") or {}).get("user_id")
+            if meta_uid and str(meta_uid) != str(user.id):
+                continue
+            seen.add(cid)
+            out.append(cid)
+    except Exception as exc:
+        logger.warning("Stripe customer list failed for user %s: %s", user.id, exc)
+    return out
 
 
 def _resolve_user(
@@ -300,9 +350,9 @@ def _apply_subscription(
         user.current_period_end = datetime.utcfromtimestamp(period_end)
 
     tier = tier_hint
-    items = (subscription.get("items") or {}).get("data") or []
+    items = _subscription_items(subscription)
     if not tier and items:
-        tier = _tier_from_price(_price_id_from_item(items[0]))
+        tier = _tier_from_line_item(items[0])
     if not tier:
         tier = metadata.get("tier")
 
@@ -340,26 +390,29 @@ def _apply_subscription(
     return user
 
 
-def _apply_checkout_session(db: Session, session: dict) -> None:
+def _apply_checkout_session(
+    db: Session, session: dict, *, user: User | None = None
+) -> None:
     """Apply plan changes immediately after Stripe Checkout completes."""
     metadata = session.get("metadata") or {}
     tier_hint = metadata.get("tier")
     customer_id = _stripe_id(session.get("customer"))
     user_id = metadata.get("user_id") or session.get("client_reference_id")
 
-    user = _resolve_user(
+    resolved = user or _resolve_user(
         db,
         customer_id=customer_id or None,
         user_id=user_id,
         client_reference_id=session.get("client_reference_id"),
     )
-    if not user:
+    if not resolved:
         logger.warning(
             "Checkout session for unknown user (customer=%s user_id=%s)",
             customer_id,
             user_id,
         )
         return
+    user = resolved
 
     if customer_id:
         user.stripe_customer_id = customer_id
@@ -373,7 +426,7 @@ def _apply_checkout_session(db: Session, session: dict) -> None:
         try:
             line_items = client.checkout.Session.list_line_items(session["id"], limit=1)
             if line_items.data:
-                tier_hint = _tier_from_price(_price_id_from_item(line_items.data[0]))
+                tier_hint = _tier_from_line_item(line_items.data[0])
         except Exception as exc:
             logger.warning("Could not read checkout line items: %s", exc)
 
@@ -382,9 +435,11 @@ def _apply_checkout_session(db: Session, session: dict) -> None:
     currency = session.get("currency") or "usd"
     paid_cents = amount if payment_status == "paid" and amount else None
 
+    checkout_complete = _checkout_is_complete(session)
+
     # Apply tier immediately from checkout metadata so the UI updates even if
     # the Subscription object is not fully active yet (e.g. status incomplete).
-    if _checkout_is_complete(session) and tier_hint in PAID_PLANS:
+    if checkout_complete and tier_hint in PAID_PLANS:
         user.plan = tier_hint
         user.trial_end = None
         if payment_status == "no_payment_required":
@@ -398,6 +453,18 @@ def _apply_checkout_session(db: Session, session: dict) -> None:
             user.id,
             payment_status,
         )
+    elif checkout_complete and sub_id and not tier_hint:
+        # Paid checkout but tier metadata missing — still end internal trial.
+        user.trial_end = None
+        user.plan_status = "active" if payment_status == "paid" else "trialing"
+        if user.plan == "trial":
+            user.plan = settings.trial_default_tier or "basic"
+        db.commit()
+        logger.warning(
+            "Checkout for user %s missing tier metadata; applied default plan %s",
+            user.id,
+            user.plan,
+        )
 
     if not sub_id:
         return
@@ -407,7 +474,7 @@ def _apply_checkout_session(db: Session, session: dict) -> None:
         _apply_subscription(
             db,
             sub,
-            tier_hint=tier_hint,
+            tier_hint=tier_hint or user.plan,
             notify=True,
             payment_amount_cents=paid_cents,
             payment_currency=currency,
@@ -421,26 +488,6 @@ def _apply_checkout_session(db: Session, session: dict) -> None:
         )
 
 
-def _link_stripe_customer_by_email(db: Session, user: User) -> bool:
-    """Find a Stripe customer by email when checkout completed but ID was not saved."""
-    if user.stripe_customer_id or not is_configured():
-        return bool(user.stripe_customer_id)
-    try:
-        client = _client()
-        result = client.Customer.list(email=user.email, limit=5)
-        for cust in result.data or []:
-            meta_uid = (cust.get("metadata") or {}).get("user_id")
-            if meta_uid and str(meta_uid) != str(user.id):
-                continue
-            user.stripe_customer_id = cust["id"]
-            db.commit()
-            logger.info("Linked Stripe customer %s to user %s by email", cust["id"], user.id)
-            return True
-    except Exception as exc:
-        logger.warning("Stripe customer lookup by email failed for user %s: %s", user.id, exc)
-    return False
-
-
 def sync_from_checkout_session(db: Session, user: User, session_id: str) -> bool:
     """Apply subscription state from a completed Checkout session (post-redirect sync)."""
     if not is_configured() or not session_id:
@@ -451,12 +498,11 @@ def sync_from_checkout_session(db: Session, user: User, session_id: str) -> bool
             session = client.checkout.Session.retrieve(session_id)
             if not _session_belongs_to_user(session, user):
                 logger.warning(
-                    "Checkout session %s does not belong to user %s",
+                    "Checkout session %s customer mismatch for user %s; applying for authenticated user",
                     session_id,
                     user.id,
                 )
-                return False
-            _apply_checkout_session(db, session)
+            _apply_checkout_session(db, session, user=user)
             db.refresh(user)
             if user.stripe_subscription_id and current_plan(user) != "trial":
                 return True
@@ -468,40 +514,64 @@ def sync_from_checkout_session(db: Session, user: User, session_id: str) -> bool
         return False
 
 
-def sync_user_subscription(db: Session, user: User) -> bool:
-    """Proactively sync the user's subscription from Stripe. Returns True if updated."""
+def force_sync_user_from_stripe(db: Session, user: User) -> bool:
+    """Aggressively sync subscription from Stripe (all customers matching email)."""
     if not is_configured():
         return False
-    _link_stripe_customer_by_email(db, user)
-    db.refresh(user)
-    if not user.stripe_customer_id:
-        return False
+    updated = False
     try:
         client = _client()
-        for status in ("active", "trialing", "past_due"):
-            subs = client.Subscription.list(
-                customer=user.stripe_customer_id,
-                status=status,
-                limit=1,
-            )
-            if subs and subs.data:
-                _apply_subscription(db, subs.data[0])
-                db.refresh(user)
-                return True
+        customer_ids = _stripe_customer_ids_for_user(user)
+        for customer_id in customer_ids:
+            user.stripe_customer_id = customer_id
+            db.commit()
+            for status in ("active", "trialing", "past_due", "incomplete"):
+                subs = client.Subscription.list(
+                    customer=customer_id,
+                    status=status,
+                    limit=5,
+                )
+                for sub in subs.data or []:
+                    meta = sub.get("metadata") or {}
+                    meta_uid = meta.get("user_id")
+                    if meta_uid and str(meta_uid) != str(user.id):
+                        continue
+                    _apply_subscription(db, sub)
+                    db.refresh(user)
+                    updated = True
+                    if current_plan(user) != "trial":
+                        return True
 
-        subs = client.Subscription.list(
-            customer=user.stripe_customer_id,
-            status="all",
-            limit=5,
-        )
-        for sub in subs.data or []:
-            if sub.get("status") in ("active", "trialing", "incomplete"):
+            subs = client.Subscription.list(
+                customer=customer_id,
+                status="all",
+                limit=10,
+            )
+            for sub in subs.data or []:
+                if sub.get("status") not in (
+                    "active",
+                    "trialing",
+                    "incomplete",
+                    "past_due",
+                ):
+                    continue
+                meta = sub.get("metadata") or {}
+                meta_uid = meta.get("user_id")
+                if meta_uid and str(meta_uid) != str(user.id):
+                    continue
                 _apply_subscription(db, sub)
                 db.refresh(user)
-                return True
+                updated = True
+                if current_plan(user) != "trial":
+                    return True
     except Exception as exc:
-        logger.warning("Failed to sync subscription for user %s: %s", user.id, exc)
-    return False
+        logger.warning("Force sync failed for user %s: %s", user.id, exc)
+    return updated
+
+
+def sync_user_subscription(db: Session, user: User) -> bool:
+    """Proactively sync the user's subscription from Stripe. Returns True if updated."""
+    return force_sync_user_from_stripe(db, user)
 
 
 def handle_webhook(db: Session, payload: bytes, sig_header: str) -> str:
@@ -525,7 +595,13 @@ def handle_webhook(db: Session, payload: bytes, sig_header: str) -> str:
     ):
         _apply_subscription(db, obj, notify=etype == "customer.subscription.created")
     elif etype == "checkout.session.completed":
-        _apply_checkout_session(db, obj)
+        session = obj
+        if isinstance(obj, dict) and obj.get("id"):
+            try:
+                session = client.checkout.Session.retrieve(obj["id"])
+            except Exception as exc:
+                logger.warning("Could not retrieve checkout session for webhook: %s", exc)
+        _apply_checkout_session(db, session)
     elif etype == "invoice.payment_failed":
         customer_id = _stripe_id(obj.get("customer"))
         user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
