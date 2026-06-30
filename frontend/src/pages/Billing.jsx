@@ -22,8 +22,14 @@ export default function Billing() {
     load()
     const params = new URLSearchParams(window.location.search)
     const status = params.get('status')
-    if (status === 'success') setMessage({ type: 'success', text: 'Subscription updated. Thank you!' })
-    else if (status === 'cancel') setMessage({ type: 'info', text: 'Checkout canceled.' })
+    if (status === 'success') {
+      setMessage({ type: 'success', text: 'Subscription updated. Thank you!' })
+      window.dispatchEvent(new CustomEvent('plan:updated'))
+      window.history.replaceState({}, '', window.location.pathname)
+    } else if (status === 'cancel') {
+      setMessage({ type: 'info', text: 'Checkout canceled.' })
+      window.history.replaceState({}, '', window.location.pathname)
+    }
   }, [])
 
   const subscribe = async (tier) => {

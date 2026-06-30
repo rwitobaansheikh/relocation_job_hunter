@@ -56,7 +56,7 @@ def get_billing(
     # Proactively sync subscription status if the user has a customer ID
     # This ensures immediate updates after checkout returns to the app
     billing.sync_user_subscription(db, user)
-    
+    db.refresh(user)
     limits = effective_limits(user)
 
     profile = db.query(UserProfile).filter(UserProfile.user_id == user.id).first()

@@ -17,6 +17,9 @@ export default function PlanGate({ children }) {
 
   useEffect(() => {
     refreshBilling()
+    const onPlanUpdated = () => refreshBilling()
+    window.addEventListener('plan:updated', onPlanUpdated)
+    return () => window.removeEventListener('plan:updated', onPlanUpdated)
   }, [location.pathname])
 
   useEffect(() => {

@@ -60,6 +60,8 @@ class User(Base):
     # Trial lifecycle emails (avoid duplicate sends).
     trial_reminder_sent = Column(Boolean, default=False)
     trial_expired_email_sent = Column(Boolean, default=False)
+    # Dedup subscription confirmation emails (sub_id:tier[:paid]).
+    subscription_email_key = Column(String(120), default="")
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -288,6 +290,7 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "oauth_provider": "VARCHAR(20) DEFAULT ''",
         "trial_reminder_sent": "BOOLEAN DEFAULT 0",
         "trial_expired_email_sent": "BOOLEAN DEFAULT 0",
+        "subscription_email_key": "VARCHAR(120) DEFAULT ''",
     },
     "automation_runs": {
         "automation_loop_id": "INTEGER",

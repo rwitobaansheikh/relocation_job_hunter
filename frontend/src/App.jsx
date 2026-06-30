@@ -24,8 +24,14 @@ import PlanGate from './components/PlanGate'
 
 function PlanBadge() {
   const [billing, setBilling] = useState(null)
-  useEffect(() => {
+  const refresh = () => {
     api.getBilling().then(setBilling).catch(() => {})
+  }
+  useEffect(() => {
+    refresh()
+    const onPlanUpdated = () => refresh()
+    window.addEventListener('plan:updated', onPlanUpdated)
+    return () => window.removeEventListener('plan:updated', onPlanUpdated)
   }, [])
   if (!billing) return null
   const label = billing.plan === 'unlimited' ? 'Unlimited' : billing.plan
