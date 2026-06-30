@@ -87,7 +87,7 @@ def create_checkout_session(
         line_items=[{"price": price, "quantity": 1}],
         allow_promotion_codes=True,
         payment_method_collection="always",
-        success_url=f"{base}/app/billing?status=success",
+        success_url=f"{base}/app/billing?status=success&session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{base}/app/billing?status=cancel",
         metadata={"user_id": str(user.id), "tier": tier, "trial": str(with_trial).lower()},
         subscription_data=subscription_data,
@@ -144,7 +144,15 @@ def _price_id_from_item(item: dict) -> Optional[str]:
         return price or None
     if isinstance(price, dict):
         return price.get("id") or None
-    return _stripe_id(price) or None
+    price_id = _stripe_id(price) or None
+    if price_id:
+        return price_id
+    plan = item.get("plan")
+    if isinstance(plan, str):
+        return plan or None
+    if isinstance(plan, dict):
+        return plan.get("id") or None
+    return None
 
 
 def _tier_from_price(price_id: Optional[str]) -> Optional[str]:
@@ -268,8 +276,17 @@ def _apply_subscription(
 
     if status in ("active", "trialing") and tier:
         user.plan = tier
+        # Stripe subscription replaces the internal signup trial.
+        user.trial_end = None
     elif status in ("canceled", "unpaid", "incomplete_expired"):
         user.plan = "expired"
+    elif status in ("active", "trialing") and not tier:
+        logger.warning(
+            "Stripe subscription %s for user %s has status %s but tier could not be resolved",
+            subscription_id,
+            user.id,
+            status,
+        )
 
     db.commit()
     db.refresh(user)
@@ -309,6 +326,14 @@ def _apply_checkout_session(db: Session, session: dict) -> None:
         return
 
     client = _client()
+    if not tier_hint:
+        try:
+            line_items = client.checkout.Session.list_line_items(session["id"], limit=1)
+            if line_items.data:
+                tier_hint = _tier_from_price(_price_id_from_item(line_items.data[0]))
+        except Exception as exc:
+            logger.warning("Could not read checkout line items: %s", exc)
+
     sub = client.Subscription.retrieve(sub_id, expand=["items.data.price"])
     payment_status = session.get("payment_status") or ""
     amount = session.get("amount_total")
@@ -325,9 +350,52 @@ def _apply_checkout_session(db: Session, session: dict) -> None:
     )
 
 
+def _link_stripe_customer_by_email(db: Session, user: User) -> bool:
+    """Find a Stripe customer by email when checkout completed but ID was not saved."""
+    if user.stripe_customer_id or not is_configured():
+        return bool(user.stripe_customer_id)
+    try:
+        client = _client()
+        result = client.Customer.list(email=user.email, limit=5)
+        for cust in result.data or []:
+            meta_uid = (cust.get("metadata") or {}).get("user_id")
+            if meta_uid and str(meta_uid) != str(user.id):
+                continue
+            user.stripe_customer_id = cust["id"]
+            db.commit()
+            logger.info("Linked Stripe customer %s to user %s by email", cust["id"], user.id)
+            return True
+    except Exception as exc:
+        logger.warning("Stripe customer lookup by email failed for user %s: %s", user.id, exc)
+    return False
+
+
+def sync_from_checkout_session(db: Session, user: User, session_id: str) -> bool:
+    """Apply subscription state from a completed Checkout session (post-redirect sync)."""
+    if not is_configured() or not session_id:
+        return False
+    try:
+        client = _client()
+        session = client.checkout.Session.retrieve(session_id)
+        metadata = session.get("metadata") or {}
+        if str(metadata.get("user_id", "")) not in ("", str(user.id)):
+            logger.warning("Checkout session %s does not belong to user %s", session_id, user.id)
+            return False
+        _apply_checkout_session(db, session)
+        db.refresh(user)
+        return bool(user.stripe_subscription_id)
+    except Exception as exc:
+        logger.warning("Checkout session sync failed for user %s: %s", user.id, exc)
+        return False
+
+
 def sync_user_subscription(db: Session, user: User) -> bool:
     """Proactively sync the user's subscription from Stripe. Returns True if updated."""
-    if not is_configured() or not user.stripe_customer_id:
+    if not is_configured():
+        return False
+    _link_stripe_customer_by_email(db, user)
+    db.refresh(user)
+    if not user.stripe_customer_id:
         return False
     try:
         client = _client()

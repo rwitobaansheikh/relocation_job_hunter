@@ -52,11 +52,18 @@ def get_billing(
     db: Session = Depends(get_db),
 ):
     country = request.headers.get("CF-IPCountry") or request.headers.get("cf-ipcountry")
-    
-    # Proactively sync subscription status if the user has a customer ID
-    # This ensures immediate updates after checkout returns to the app
-    billing.sync_user_subscription(db, user)
+
+    session_id = request.query_params.get("session_id")
+    if session_id:
+        billing.sync_from_checkout_session(db, user, session_id)
+    else:
+        billing.sync_user_subscription(db, user)
+    # Fallback: link Stripe customer by email if checkout/webhook did not persist IDs.
+    if not user.stripe_subscription_id:
+        billing.sync_user_subscription(db, user)
     db.refresh(user)
+
+    plan = current_plan(user)
     limits = effective_limits(user)
 
     profile = db.query(UserProfile).filter(UserProfile.user_id == user.id).first()
@@ -75,11 +82,11 @@ def get_billing(
     )
 
     days_left = 0
-    if user.trial_end and user.trial_end > datetime.utcnow():
+    if plan == "trial" and user.trial_end and user.trial_end > datetime.utcnow():
         days_left = (user.trial_end - datetime.utcnow()).days + 1
 
     return BillingResponse(
-        plan=current_plan(user),
+        plan=plan,
         plan_status=user.plan_status or "",
         trial_end=user.trial_end,
         trial_days_left=days_left,

@@ -196,7 +196,8 @@ export const api = {
   deleteLoop: (loopId) => request(`/automation/loops/${loopId}`, { method: 'DELETE' }),
 
   // --- Billing ---
-  getBilling: () => request('/billing'),
+  getBilling: (sessionId) =>
+    request(sessionId ? `/billing?session_id=${encodeURIComponent(sessionId)}` : '/billing'),
   checkout: (tier) => request('/billing/checkout', { method: 'POST', body: JSON.stringify({ tier }) }),
   startTrialCheckout: () => request('/billing/trial-checkout', { method: 'POST' }),
   openPortal: () => request('/billing/portal', { method: 'POST' }),

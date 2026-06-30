@@ -85,10 +85,18 @@ def current_plan(user) -> str:
     trial | expired."""
     if getattr(user, "unlimited_access", False) or getattr(user, "role", "") == "admin":
         return "unlimited"
+
     plan = (getattr(user, "plan", "") or "").lower()
     status = (getattr(user, "plan_status", "") or "").lower()
+
+    # Stripe subscription is the source of truth once linked.
+    if getattr(user, "stripe_subscription_id", ""):
+        if plan in PAID_PLANS and status in ("active", "trialing", "past_due"):
+            return plan
+
     if plan in PAID_PLANS and status in ("active", "trialing"):
         return plan
+
     trial_end = getattr(user, "trial_end", None)
     if trial_end and datetime.utcnow() < trial_end:
         return "trial"

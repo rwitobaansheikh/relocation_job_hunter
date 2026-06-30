@@ -8,10 +8,15 @@ export default function Billing() {
   const [busy, setBusy] = useState(null)
   const [message, setMessage] = useState(null)
 
-  const load = async () => {
+  const load = async (sessionId) => {
     setLoading(true)
     try {
-      setData(await api.getBilling())
+      let billing = await api.getBilling(sessionId)
+      if (sessionId && billing?.plan === 'trial') {
+        await new Promise((resolve) => setTimeout(resolve, 1500))
+        billing = await api.getBilling(sessionId)
+      }
+      setData(billing)
     } catch (err) {
       setMessage({ type: 'error', text: err.message })
     }
@@ -19,9 +24,10 @@ export default function Billing() {
   }
 
   useEffect(() => {
-    load()
     const params = new URLSearchParams(window.location.search)
+    const sessionId = params.get('session_id')
     const status = params.get('status')
+    load(sessionId)
     if (status === 'success') {
       setMessage({ type: 'success', text: 'Subscription updated. Thank you!' })
       window.dispatchEvent(new CustomEvent('plan:updated'))
@@ -74,7 +80,11 @@ export default function Billing() {
   const planLabel = data.plan === 'unlimited' ? 'Unlimited (admin)' : data.plan
   const hasSubscription = ['basic', 'standard', 'pro'].includes(data.plan)
   const trialDays = data.trial_days || 3
-  const showTrialCta = data.stripe_configured && !data.has_stripe_subscription && data.plan !== 'unlimited'
+  const showTrialCta =
+    data.stripe_configured &&
+    !data.has_stripe_subscription &&
+    data.plan === 'trial' &&
+    data.plan !== 'unlimited'
 
   return (
     <div>
