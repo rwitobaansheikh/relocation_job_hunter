@@ -36,8 +36,6 @@ from app.schemas import (
     AutomationRunResponse,
     ChangePasswordRequest,
     ContactCreate,
-    ContactResponse,
-    ContactsLookupResponse,
     CoverLetterUpdateRequest,
     DeleteAccountRequest,
     FollowUpRequest,
@@ -47,8 +45,7 @@ from app.schemas import (
     JobSearchRequest,
     LoginRequest,
     ManualJobRequest,
-    OutreachEmailResponse,
-    RecruitingEmailFindRequest,
+    OutreachDraftResponse,
     RegisterRequest,
     ReviewCreate,
     ReviewPublic,
@@ -57,12 +54,9 @@ from app.schemas import (
     SearchStatsResponse,
     SENIORITY_LEVELS,
     WORK_TYPES,
-    SendOutreachBatchRequest,
-    SendOutreachRequest,
     SettingsResponse,
     SettingsUpdate,
     TailorDocumentsRequest,
-    UpdateCompanyDomainRequest,
     TailoredDocumentsResponse,
     TokenResponse,
     UserProfileResponse,
@@ -74,7 +68,6 @@ from app.services.account import delete_account, delete_application
 from app.services.document_generator import DocumentGenerator
 from app.services.cv_link_extractor import build_project_link_map, serialize_project_links
 from app.services.document_parser import extract_text_from_file
-from app.services.email_finder import EmailFinder
 from app.services.email_service import EmailService
 from app.services.system_email import send_system_email
 from app.services.job_matcher import JobMatcher
@@ -589,6 +582,8 @@ def add_manual_job(
 def list_applications(
     status: Optional[str] = None,
     sort: Optional[str] = None,
+    automation_batch: Optional[str] = None,
+    manual_only: bool = False,
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
@@ -599,12 +594,43 @@ def list_applications(
     )
     if status:
         query = query.filter(JobApplication.status == status)
+    if automation_batch:
+        query = query.filter(JobApplication.automation_batch_date == automation_batch)
+    elif manual_only:
+        query = query.filter(
+            (JobApplication.automation_batch_date == "")
+            | (JobApplication.automation_batch_date.is_(None))
+        )
     if sort == "match":
         return query.order_by(
             JobApplication.ai_match_score.desc(),
             JobApplication.created_at.desc(),
         ).all()
+    if automation_batch:
+        return query.order_by(
+            JobApplication.ai_match_score.desc(),
+            JobApplication.created_at.desc(),
+        ).all()
     return query.order_by(JobApplication.created_at.desc()).all()
+
+
+@router.get("/applications/automation-batches")
+def list_automation_batches(
+    profile: UserProfile = Depends(get_current_profile),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(JobApplication.automation_batch_date)
+        .filter(
+            JobApplication.user_profile_id == profile.id,
+            JobApplication.automation_batch_date != "",
+            JobApplication.automation_batch_date.isnot(None),
+        )
+        .distinct()
+        .order_by(JobApplication.automation_batch_date.desc())
+        .all()
+    )
+    return [row[0] for row in rows if row[0]]
 
 
 @router.delete("/applications")
@@ -840,305 +866,20 @@ async def tailor_single(
         raise HTTPException(status_code=503, detail=message)
 
 
-@router.post("/applications/send-outreach", response_model=list[OutreachEmailResponse])
-async def send_outreach(
-    request: SendOutreachRequest,
+@router.post("/applications/{application_id}/outreach-draft", response_model=OutreachDraftResponse)
+async def generate_outreach_draft(
+    application_id: int,
     user: User = Depends(require_active_plan),
     profile: UserProfile = Depends(get_current_profile),
     db: Session = Depends(get_db),
 ):
-    _owned_application(db, request.application_id, profile)
-
-    # A real outreach send (not a preview/test) counts as one manual application
-    # against the plan's daily cap.
-    is_real_send = not request.dry_run and not request.test_to_self
-    if is_real_send:
-        limits = effective_limits(user)
-        if get_usage(db, profile.id, "manual") >= limits.manual_per_day:
-            raise HTTPException(
-                status_code=402,
-                detail=(
-                    f"You've reached your plan's daily limit of {limits.manual_per_day} "
-                    "manual applications. Upgrade your plan to apply to more jobs today."
-                ),
-            )
-
+    """Generate a cold outreach email draft for the user to send manually."""
+    _owned_application(db, application_id, profile)
     service = EmailService()
     try:
-        results = await service.send_outreach(
-            db, request.application_id, request.dry_run, request.test_to_self
-        )
+        return await service.generate_outreach_draft(db, application_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-
-    if is_real_send and any(r.status == "sent" for r in results):
-        incr_usage(db, profile.id, "manual", 1)
-        db.commit()
-    return results
-
-
-@router.post("/applications/send-outreach-batch")
-async def send_outreach_batch(
-    request: SendOutreachBatchRequest,
-    user: User = Depends(require_active_plan),
-    profile: UserProfile = Depends(get_current_profile),
-    db: Session = Depends(get_db),
-):
-    """Send outreach to multiple tailored applications (bulk apply workflow)."""
-    limits = effective_limits(user)
-    owned = {
-        a.id
-        for a in db.query(JobApplication)
-        .filter(
-            JobApplication.user_profile_id == profile.id,
-            JobApplication.id.in_(request.application_ids),
-        )
-        .all()
-    }
-    ids = [i for i in request.application_ids if i in owned]
-    if not ids:
-        raise HTTPException(status_code=404, detail="No matching applications found")
-
-    if not request.dry_run:
-        used = get_usage(db, profile.id, "manual")
-        remaining = max(0, limits.manual_per_day - used)
-        if remaining <= 0:
-            raise HTTPException(
-                status_code=402,
-                detail=(
-                    f"You've reached your plan's daily limit of {limits.manual_per_day} "
-                    "manual applications. Upgrade your plan to apply to more jobs today."
-                ),
-            )
-        ids = ids[:remaining]
-
-    service = EmailService()
-    summary = {"sent": 0, "failed": 0, "results": []}
-    for app_id in ids:
-        try:
-            results = await service.send_outreach(db, app_id, request.dry_run, False)
-            if not request.dry_run and any(r.status == "sent" for r in results):
-                incr_usage(db, profile.id, "manual", 1)
-                summary["sent"] += 1
-            summary["results"].append({"application_id": app_id, "emails": len(results), "ok": True})
-        except Exception as exc:
-            summary["failed"] += 1
-            summary["results"].append({"application_id": app_id, "ok": False, "error": str(exc)})
-    db.commit()
-    return summary
-
-
-@router.get("/applications/{application_id}/emails", response_model=list[OutreachEmailResponse])
-def get_outreach_emails(
-    application_id: int,
-    profile: UserProfile = Depends(get_current_profile),
-    db: Session = Depends(get_db),
-):
-    _owned_application(db, application_id, profile)
-    return db.query(OutreachEmail).filter(OutreachEmail.application_id == application_id).all()
-
-
-@router.post("/recruiting-emails/find", response_model=ContactsLookupResponse)
-async def find_recruiting_emails(
-    request: RecruitingEmailFindRequest,
-    profile: UserProfile = Depends(get_current_profile),
-):
-    """Find 3–6 HR/recruiting emails from a company name, website, or job link."""
-    return await _lookup_recruiting_contacts(
-        company=request.company.strip(),
-        website=request.website.strip(),
-        job_url=request.job_url.strip(),
-    )
-
-
-async def _lookup_recruiting_contacts(
-    *,
-    company: str = "",
-    website: str = "",
-    job_url: str = "",
-) -> ContactsLookupResponse:
-    from app.services.company_domain_resolver import clean_domain, is_job_board_host, resolve_employer_domain
-    from app.services.url_importer import import_job_from_url
-
-    if not any([company, website, job_url]):
-        raise HTTPException(
-            status_code=400,
-            detail="Provide at least one of: company, website, or job_url.",
-        )
-
-    job_title = ""
-    if job_url and not job_url.lower().startswith(("http://", "https://")):
-        job_url = "https://" + job_url
-
-    if job_url:
-        imported = await import_job_from_url(job_url)
-        company = company or imported.get("company", "")
-        website = website or imported.get("company_domain", "")
-        job_title = imported.get("title", "")
-
-    stored = clean_domain(website)
-    domain_was_job_board = bool(stored and is_job_board_host(stored))
-
-    domain = await resolve_employer_domain(
-        company=company,
-        company_domain=website,
-        job_url=job_url,
-    )
-
-    finder = EmailFinder()
-    contacts = await finder.find_contacts(
-        company=company,
-        domain=domain,
-        job_title=job_title,
-        limit=settings.max_emails_per_company,
-        job_url=job_url,
-        min_contacts=settings.min_emails_per_company,
-    )
-
-    sources_used: list[str] = ["website", "search"]
-    if job_url:
-        sources_used.insert(0, "job_posting")
-    if any(c.verification_status in ("accepted", "catch_all") for c in contacts):
-        sources_used.append("smtp_verify")
-    if any(c.verification_status == "guess" for c in contacts):
-        sources_used.append("fallback")
-
-    message = ""
-    if len(contacts) < settings.min_emails_per_company:
-        message = (
-            f"Only found {len(contacts)} contact(s). "
-            "Try providing the company website or a direct job link."
-        )
-    elif any(c.verification_status == "guess" for c in contacts):
-        message = (
-            "Some addresses are likely recruiting inboxes (unverified). "
-            "Confirm before sending outreach."
-        )
-
-    return ContactsLookupResponse(
-        contacts=[
-            ContactResponse(
-                name=c.name,
-                email=c.email,
-                title=c.title,
-                confidence=c.confidence,
-                pattern=c.pattern,
-                verification_status=c.verification_status,
-                catch_all=c.catch_all,
-            )
-            for c in contacts
-        ],
-        resolved_domain=domain,
-        company=company,
-        domain_was_job_board=domain_was_job_board,
-        message=message,
-        sources_used=sources_used,
-    )
-
-
-@router.get("/applications/{application_id}/contacts", response_model=ContactsLookupResponse)
-async def find_application_contacts(
-    application_id: int,
-    profile: UserProfile = Depends(get_current_profile),
-    db: Session = Depends(get_db),
-):
-    """Look up outreach contacts via website scrape, search, and optional SMTP verify."""
-    from app.services.company_domain_resolver import clean_domain, is_job_board_host, resolve_employer_domain
-
-    app = _owned_application(db, application_id, profile, with_job=True)
-    if not app.job:
-        raise HTTPException(status_code=400, detail="Application has no associated job")
-
-    stored = clean_domain(app.job.company_domain or "")
-    domain_was_job_board = bool(stored and is_job_board_host(stored))
-
-    domain = await resolve_employer_domain(
-        company=app.job.company,
-        company_domain=app.job.company_domain or "",
-        job_url=app.job.url or "",
-    )
-
-    if domain and app.job.company_domain != domain:
-        app.job.company_domain = domain
-        db.commit()
-
-    finder = EmailFinder()
-    contacts = await finder.find_contacts(
-        company=app.job.company,
-        domain=domain,
-        job_title=app.job.title,
-        limit=settings.max_emails_per_company,
-        job_url=app.job.url or "",
-        min_contacts=settings.min_emails_per_company,
-    )
-
-    sources_used: list[str] = ["website", "search"]
-    if app.job.url:
-        sources_used.insert(0, "job_posting")
-    if any(c.verification_status in ("accepted", "catch_all") for c in contacts):
-        sources_used.append("smtp_verify")
-    if any(c.verification_status == "guess" for c in contacts):
-        sources_used.append("fallback")
-
-    message = ""
-    if len(contacts) < settings.min_emails_per_company:
-        message = (
-            f"Only found {len(contacts)} contact(s). "
-            "Confirm the employer domain above and try again."
-        )
-    elif any(c.verification_status == "guess" for c in contacts):
-        message = (
-            "Some addresses are likely recruiting inboxes (unverified). "
-            "Confirm before sending outreach."
-        )
-
-    return ContactsLookupResponse(
-        contacts=[
-            ContactResponse(
-                name=c.name,
-                email=c.email,
-                title=c.title,
-                confidence=c.confidence,
-                pattern=c.pattern,
-                verification_status=c.verification_status,
-                catch_all=c.catch_all,
-            )
-            for c in contacts
-        ],
-        resolved_domain=domain,
-        company=app.job.company or "",
-        domain_was_job_board=domain_was_job_board,
-        message=message,
-        sources_used=sources_used,
-    )
-
-
-@router.patch("/applications/{application_id}/company-domain")
-def update_application_company_domain(
-    application_id: int,
-    request: UpdateCompanyDomainRequest,
-    profile: UserProfile = Depends(get_current_profile),
-    db: Session = Depends(get_db),
-):
-    """Override the employer domain used for email outreach on this job."""
-    from app.services.company_domain_resolver import clean_domain, is_job_board_host
-
-    app = _owned_application(db, application_id, profile, with_job=True)
-    if not app.job:
-        raise HTTPException(status_code=400, detail="Application has no associated job")
-
-    domain = clean_domain(request.company_domain)
-    if not domain or "." not in domain:
-        raise HTTPException(status_code=400, detail="Enter a valid domain like company.com")
-    if is_job_board_host(domain):
-        raise HTTPException(
-            status_code=400,
-            detail="That looks like a job board, not the employer. Use the hiring company's domain.",
-        )
-
-    app.job.company_domain = domain
-    db.commit()
-    return {"company_domain": domain}
 
 
 @router.post("/applications/follow-up")

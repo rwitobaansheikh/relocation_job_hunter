@@ -13,12 +13,12 @@ const FEATURES = [
     body: 'Every job gets a CV360-style ATS CV and cover letter rewritten for the role — preview, edit, and download as Word docs.',
   },
   {
-    title: 'SMTP-verified email outreach',
-    body: 'Find recruiter and HR emails for each company — verified against their mail server — then send tailored outreach from your inbox.',
+    title: 'Daily automation',
+    body: 'Set a loop to search every 24 hours and auto-tailor documents. Review each day\'s queue in Applications when you\'re ready to apply.',
   },
   {
     title: 'Bulk document tailoring',
-    body: 'Tailor documents for dozens of discovered jobs in one click, then apply on job sites or email recruiters directly.',
+    body: 'Tailor documents for dozens of discovered jobs in one click, then apply on each job site with your downloads.',
   },
   {
     title: 'AI role suggestions',
@@ -60,11 +60,12 @@ export default function Landing() {
       </nav>
 
       <header className="landing-hero">
-        <div className="landing-hero__badge">3-day free trial · Search · Tailor · Outreach</div>
-        <h1>Find jobs. Tailor your CV. Reach hiring teams.</h1>
+        <div className="landing-hero__badge">3-day free trial · Search · Tailor · Apply</div>
+        <h1>Find jobs. Tailor your CV. Apply with confidence.</h1>
         <p>
-          Job Application Flow brings job search, AI document tailoring, and email outreach into one workspace —
-          discover roles, generate tailored CVs and cover letters, find recruiter emails, and apply your way.
+          Job Application Flow brings job search and AI document tailoring into one workspace —
+          discover roles, generate tailored CVs and cover letters, and apply on job sites yourself.
+          We help you draft outreach emails, but never send on your behalf.
         </p>
         <div className="landing-cta">
           <button className="btn-primary" onClick={() => navigate('/register')}>Start free trial</button>
@@ -73,7 +74,7 @@ export default function Landing() {
       </header>
 
       <h2 className="section-heading">Everything you need to run an aggressive job search</h2>
-      <p className="section-sub">One workspace from job search to tailored documents to outreach and apply.</p>
+      <p className="section-sub">One workspace from job search to tailored documents to apply.</p>
       <div className="feature-grid">
         {FEATURES.map((f) => (
           <div key={f.title} className="card">
@@ -88,7 +89,7 @@ export default function Landing() {
         <div className="card"><h3>1. Upload your CV</h3><p>Upload your CV — we suggest job roles from your experience, or enter your own target titles and locations.</p></div>
         <div className="card"><h3>2. Search jobs</h3><p>Run a search across multiple job boards. Every match is saved to your Applications pipeline automatically.</p></div>
         <div className="card"><h3>3. Tailor documents</h3><p>The AI generates a CV360-style ATS CV and cover letter tailored to each job description.</p></div>
-        <div className="card"><h3>4. Outreach or apply</h3><p>Find verified recruiter emails and send outreach from your inbox, or apply directly on the job site — track status as you go.</p></div>
+        <div className="card"><h3>4. Apply yourself</h3><p>Download your documents, apply on the job site, and track status as you go. Optionally copy a drafted outreach email into your inbox.</p></div>
       </div>
 
       <div style={{ textAlign: 'center', marginTop: '3rem' }}>

@@ -99,11 +99,7 @@ export default function Settings() {
       .then((s) => {
         setSettings(s)
         setForm({
-          smtp_host: s.smtp_host || '',
-          smtp_port: s.smtp_port || 587,
-          smtp_password: '',
           gemini_api_key: '',
-          rocketreach_api_key: '',
         })
       })
       .catch((err) => setMessage({ type: 'error', text: err.message }))
@@ -116,12 +112,10 @@ export default function Settings() {
     setMessage(null)
     try {
       const payload = { ...form }
-      if (!payload.smtp_password) delete payload.smtp_password
       if (!payload.gemini_api_key) delete payload.gemini_api_key
-      if (!payload.rocketreach_api_key) delete payload.rocketreach_api_key
       const updated = await api.updateSettings(payload)
       setSettings(updated)
-      setForm((f) => ({ ...f, smtp_password: '', gemini_api_key: '', rocketreach_api_key: '' }))
+      setForm({ gemini_api_key: '' })
       setMessage({ type: 'success', text: 'Settings saved' })
     } catch (err) {
       setMessage({ type: 'error', text: err.message })
@@ -148,40 +142,15 @@ export default function Settings() {
   return (
     <div>
       <h2 className="page-title">Settings</h2>
-      <p className="page-subtitle">Your sending identity and API keys.</p>
+      <p className="page-subtitle">Account security and optional API key overrides.</p>
 
       {message && <div className={`alert alert-${message.type}`}>{message.text}</div>}
 
       <div className="card">
-        <h3 style={{ marginBottom: '1rem' }}>Outreach mailbox (your login email)</h3>
-        <p className="muted" style={{ marginBottom: '1rem' }}>
-          Emails to recruiters are sent from <strong>{user?.email || 'your login email'}</strong>.
-          Add your mailbox app password below (Gmail users: create an App Password).
-        </p>
-        <p className="muted" style={{ marginBottom: '1rem', fontSize: '0.85rem' }}>
-          Trial reminders, test previews, and billing notices come from{' '}
-          <strong>email@jobapplicationflow.com</strong> — not from this mailbox.
-        </p>
+        <h3 style={{ marginBottom: '1rem' }}>Account</h3>
         <div className="form-group">
-          <label>Send outreach as</label>
+          <label>Email</label>
           <input value={user?.email || ''} readOnly disabled />
-        </div>
-        <div className="form-group">
-          <label>SMTP Host</label>
-          <input value={form.smtp_host} onChange={(e) => set('smtp_host', e.target.value)} placeholder="smtp.gmail.com" />
-        </div>
-        <div className="form-group">
-          <label>SMTP Port</label>
-          <input type="number" value={form.smtp_port} onChange={(e) => set('smtp_port', Number(e.target.value))} />
-        </div>
-        <div className="form-group">
-          <label>SMTP Password {settings.smtp_password_set && <span className="muted">(set - leave blank to keep)</span>}</label>
-          <input
-            type="password"
-            value={form.smtp_password}
-            onChange={(e) => set('smtp_password', e.target.value)}
-            placeholder={settings.smtp_password_set ? '••••••••' : 'app password'}
-          />
         </div>
       </div>
 
@@ -192,15 +161,11 @@ export default function Settings() {
         {showAdvanced && (
           <div style={{ marginTop: '1rem' }}>
             <p className="muted" style={{ marginBottom: '1rem' }}>
-              Optional. The app uses a local Ollama LLM by default. These overrides only apply if the server is set to cloud mode (<code>LLM_PROVIDER=gemini</code>) or for RocketReach contact lookup.
+              Optional. The app uses a local Ollama LLM by default. These overrides only apply if the server is set to cloud mode (<code>LLM_PROVIDER=gemini</code>).
             </p>
             <div className="form-group">
               <label>Gemini API key (cloud mode only) {settings.gemini_override_set && <span className="muted">(set)</span>}</label>
               <input type="password" value={form.gemini_api_key} onChange={(e) => set('gemini_api_key', e.target.value)} placeholder="leave blank to keep / use shared" />
-            </div>
-            <div className="form-group">
-              <label>RocketReach API key {settings.rocketreach_override_set && <span className="muted">(set)</span>}</label>
-              <input type="password" value={form.rocketreach_api_key} onChange={(e) => set('rocketreach_api_key', e.target.value)} placeholder="leave blank to keep / use shared" />
             </div>
           </div>
         )}

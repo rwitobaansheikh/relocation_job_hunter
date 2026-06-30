@@ -1,11 +1,8 @@
-"""Autonomous per-loop pipeline: search -> tailor -> find contacts -> send.
+"""Autonomous per-loop pipeline: search -> tailor.
 
-Each AutomationLoop targets one job role with its own filters and caps. Runs are
-bounded by:
-  - the loop's daily send cap, clamped to the owner's plan (auto/loop/day)
-  - per-company (per-domain) cap per run
-  - suppression of companies the user has already emailed
-  - the shared-API global rate limiter (inside the Gemini/Hunter clients)
+Each AutomationLoop targets one job role with its own filters. Runs are bounded by
+the loop's tailor cap and the owner's plan (tailor/day). Jobs found during a run
+are tagged with an automation_batch_date so users can review them as a daily queue.
 Every pass is recorded as an AutomationRun for visibility/audit.
 """
 
@@ -21,24 +18,15 @@ from app.database import (
     AutomationRun,
     Job,
     JobApplication,
-    OutreachEmail,
     User,
     UserProfile,
 )
 from app.services.document_generator import DocumentGenerator
-from app.services.email_service import EmailService
 from app.services.job_search import JobSearchService, SearchFilters
 from app.services.plans import effective_limits
 from app.services.usage import get_usage, incr_usage
 
 logger = logging.getLogger(__name__)
-
-_SENT_STATUSES = ("sent",)
-
-
-def _today_start() -> datetime:
-    now = datetime.utcnow()
-    return datetime(now.year, now.month, now.day)
 
 
 def _csv(value: str) -> list[str]:
@@ -56,25 +44,9 @@ def _job_matches_role(job: Job, role: str) -> bool:
     return bool(tokens) and all(t in text for t in tokens)
 
 
-def _contacted_companies(db: Session, profile_id: int) -> set[str]:
-    rows = (
-        db.query(Job.company)
-        .join(JobApplication, JobApplication.job_id == Job.id)
-        .join(OutreachEmail, OutreachEmail.application_id == JobApplication.id)
-        .filter(
-            JobApplication.user_profile_id == profile_id,
-            OutreachEmail.status.in_(_SENT_STATUSES),
-        )
-        .distinct()
-        .all()
-    )
-    return {(r[0] or "").strip().lower() for r in rows if r[0]}
-
-
 class AutomationService:
     def __init__(self) -> None:
         self.generator = DocumentGenerator()
-        self.email_service = EmailService()
 
     async def run_for_loop(
         self, db: Session, loop: AutomationLoop, limits=None
@@ -91,13 +63,13 @@ class AutomationService:
         db.commit()
         db.refresh(run)
 
+        batch_date = datetime.utcnow().strftime("%Y-%m-%d")
         notes: list[str] = [f"loop '{loop.name or loop.role or loop.id}'"]
         try:
             if limits is None and profile is not None:
                 user = db.query(User).filter(User.id == profile.user_id).first()
                 limits = effective_limits(user) if user else None
 
-            # 1) Search for fresh jobs scoped to this loop's role + filters.
             try:
                 filters = SearchFilters(
                     roles=[loop.role] if loop.role else [],
@@ -108,33 +80,36 @@ class AutomationService:
                     max_salary=loop.max_salary,
                 )
                 stats = await JobSearchService().search_jobs(
-                    db, loop.user_profile_id, settings.max_jobs_per_search, filters
+                    db,
+                    loop.user_profile_id,
+                    settings.max_jobs_per_search,
+                    filters,
+                    automation_batch_date=batch_date,
                 )
                 run.jobs_found = stats.get("jobs_stored", 0)
-                notes.append(f"search: {stats.get('jobs_stored', 0)} new")
+                notes.append(f"search: {stats.get('jobs_stored', 0)} new ({batch_date})")
             except Exception as exc:
                 logger.warning("Automation search failed for loop %s: %s", loop.id, exc)
                 notes.append(f"search error: {exc}")
 
-            # 2) Tailor up to N discovered apps for this loop's role.
             discovered = (
                 db.query(JobApplication)
                 .join(Job, Job.id == JobApplication.job_id)
                 .filter(
                     JobApplication.user_profile_id == loop.user_profile_id,
                     JobApplication.status == ApplicationStatus.DISCOVERED.value,
+                    JobApplication.automation_batch_date == batch_date,
                 )
                 .all()
             )
-            
-            # Enforce daily tailor limits for this plan
+
             tailor_limit = limits.tailor_per_day if limits else 10
             used_tailor = get_usage(db, loop.user_profile_id, "tailor")
             remaining_tailor = max(0, tailor_limit - used_tailor)
-            
+
             loop_tailor_cap = loop.max_tailor_per_run or settings.default_max_tailor_per_run
             tailor_batch_size = min(remaining_tailor, loop_tailor_cap)
-            
+
             if tailor_batch_size > 0:
                 to_tailor = [
                     a.id for a in discovered if _job_matches_role(a.job, loop.role)
@@ -148,8 +123,7 @@ class AutomationService:
                 run.jobs_tailored = 0
                 notes.append("tailor: plan limit reached")
 
-            # 3) Send within the loop + plan caps.
-            run.emails_sent = await self._send_within_caps(db, loop, limits, notes)
+            run.emails_sent = 0
             run.status = "success"
         except Exception as exc:
             logger.exception("Automation run failed for loop %s", loop.id)
@@ -162,68 +136,6 @@ class AutomationService:
             db.commit()
             db.refresh(run)
         return run
-
-    async def _send_within_caps(
-        self, db: Session, loop: AutomationLoop, limits, notes: list[str]
-    ) -> int:
-        plan_cap = limits.auto_per_loop_per_day if limits else settings.default_daily_send_cap
-        loop_cap = loop.daily_send_cap if loop.daily_send_cap is not None else 5
-        cap = min(loop_cap, plan_cap)
-        scope = f"loop:{loop.id}"
-        remaining = cap - get_usage(db, loop.user_profile_id, scope)
-        if remaining <= 0:
-            notes.append("send: loop daily cap reached")
-            return 0
-
-        per_domain_cap = loop.per_domain_cap or settings.default_per_domain_cap
-        contacted = _contacted_companies(db, loop.user_profile_id)
-
-        tailored_apps = (
-            db.query(JobApplication)
-            .join(Job, Job.id == JobApplication.job_id)
-            .filter(
-                JobApplication.user_profile_id == loop.user_profile_id,
-                JobApplication.status == ApplicationStatus.TAILORED.value,
-            )
-            .order_by(JobApplication.ai_match_score.desc())
-            .all()
-        )
-
-        sent_total = 0
-        for app in tailored_apps:
-            if remaining <= 0:
-                break
-            job = app.job
-            if not job or not _job_matches_role(job, loop.role):
-                continue
-            company_key = (job.company or "").strip().lower()
-            if company_key and company_key in contacted:
-                continue
-
-            allowance = min(per_domain_cap, settings.max_emails_per_company)
-            try:
-                results = await self.email_service.send_outreach(
-                    db, app.id, dry_run=False, max_recipients=allowance
-                )
-            except Exception as exc:
-                logger.warning("Automation send failed for app %s: %s", app.id, exc)
-                notes.append(f"send error: {exc}")
-                break  # misconfigured mailbox affects every app
-
-            if any(r.status == "sent" for r in results):
-                sent_total += 1
-                remaining -= 1
-                incr_usage(db, loop.user_profile_id, scope, 1)
-                db.commit()
-                if company_key:
-                    contacted.add(company_key)
-
-        notes.append(f"sent: {sent_total}")
-        return sent_total
-
-
-def _has_sending_identity(profile: UserProfile) -> bool:
-    return bool(profile.smtp_user and profile.smtp_password_enc)
 
 
 async def run_due_loops(db: Session) -> int:
@@ -244,7 +156,7 @@ async def run_due_loops(db: Session) -> int:
         profile = (
             db.query(UserProfile).filter(UserProfile.id == loop.user_profile_id).first()
         )
-        if not profile or not _has_sending_identity(profile):
+        if not profile:
             continue
         user = db.query(User).filter(User.id == profile.user_id).first()
         limits = effective_limits(user) if user else None

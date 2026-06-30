@@ -83,6 +83,7 @@ class JobSearchService:
         user_profile_id: int,
         max_jobs: int = 100,
         filters: Optional[SearchFilters] = None,
+        automation_batch_date: str = "",
     ) -> dict:
         """Original synchronous-like search (used by automation loops).
         Iterates the stream and accumulates stats."""
@@ -91,7 +92,9 @@ class JobSearchService:
             "jobs_stored": 0,
             "jobs_filtered": 0,
         }
-        async for event in self.search_jobs_stream(db, user_profile_id, max_jobs, filters):
+        async for event in self.search_jobs_stream(
+            db, user_profile_id, max_jobs, filters, automation_batch_date=automation_batch_date
+        ):
             if event["type"] == "done":
                 final_stats = event["stats"]
                 break
@@ -108,6 +111,7 @@ class JobSearchService:
         max_jobs: int = 100,
         filters: Optional[SearchFilters] = None,
         is_cancelled: IsCancelled | None = None,
+        automation_batch_date: str = "",
     ):
         async def cancelled() -> bool:
             return is_cancelled is not None and await is_cancelled()
@@ -186,6 +190,7 @@ class JobSearchService:
                 cutoff,
                 stats,
                 max_jobs,
+                automation_batch_date,
             )
             if event:
                 yield event
@@ -219,6 +224,7 @@ class JobSearchService:
                 cutoff,
                 stats,
                 max_jobs,
+                automation_batch_date,
             )
             if event:
                 yield event
@@ -239,6 +245,7 @@ class JobSearchService:
         cutoff: datetime,
         stats: dict,
         max_jobs: int,
+        automation_batch_date: str = "",
     ) -> tuple[dict | None, bool]:
         smin, smax, currency, salary_label = parse_salary(" ".join([job.title, job.description]))
         job.salary_min, job.salary_max = smin, smax
@@ -321,6 +328,7 @@ class JobSearchService:
                     job_id=job_record.id,
                     status="discovered",
                     ai_match_score=match_score,
+                    automation_batch_date=automation_batch_date or "",
                 )
             )
             stats["jobs_stored"] += 1

@@ -159,6 +159,37 @@ class EmailService:
         db.commit()
         return results
 
+    async def generate_outreach_draft(self, db: Session, application_id: int) -> dict[str, str]:
+        """Draft a cold outreach email for the user to copy and send manually."""
+        application = (
+            db.query(JobApplication)
+            .options(joinedload(JobApplication.user_profile).joinedload(UserProfile.user))
+            .filter(JobApplication.id == application_id)
+            .first()
+        )
+        if not application:
+            raise ValueError(f"Application {application_id} not found")
+
+        profile = application.user_profile
+        job = application.job
+        if not profile or not job:
+            raise ValueError("Application missing profile or job")
+
+        if not application.tailored_cv_path:
+            raise ValueError("Tailor your CV and cover letter first.")
+
+        background = self._build_background(profile, application)
+        contact = Contact(name="Hiring Team", email="", title="Recruiting")
+        subject, body = await self._generate_email(profile, job, contact, background)
+        footer = (
+            "\n\n---\n"
+            "Attach your tailored CV and cover letter from this app before sending."
+        )
+        return {
+            "subject": subject,
+            "body": body + footer,
+        }
+
     async def _send_test_to_self(
         self,
         db: Session,

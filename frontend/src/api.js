@@ -143,13 +143,16 @@ export const api = {
     request('/jobs/manual', { method: 'POST', body: JSON.stringify(payload) }),
 
   // --- Applications ---
-  getApplications: (status, sort) => {
+  getApplications: (status, sort, options = {}) => {
     const params = new URLSearchParams()
     if (status) params.set('status', status)
     if (sort) params.set('sort', sort)
+    if (options.automationBatch) params.set('automation_batch', options.automationBatch)
+    if (options.manualOnly) params.set('manual_only', 'true')
     const qs = params.toString()
     return request(`/applications${qs ? `?${qs}` : ''}`)
   },
+  getAutomationBatches: () => request('/applications/automation-batches'),
   getTailoredDocuments: (applicationId) => request(`/applications/${applicationId}/documents`),
   updateCoverLetter: (applicationId, text) =>
     request(`/applications/${applicationId}/cover-letter`, {
@@ -173,16 +176,8 @@ export const api = {
     request('/applications/tailor', { method: 'POST', body: JSON.stringify({ application_ids: applicationIds }) }),
   tailorSingle: (applicationId) =>
     request(`/applications/${applicationId}/tailor`, { method: 'POST' }),
-  sendOutreach: (applicationId, dryRun = false, testToSelf = false) =>
-    request('/applications/send-outreach', {
-      method: 'POST',
-      body: JSON.stringify({ application_id: applicationId, dry_run: dryRun, test_to_self: testToSelf }),
-    }),
-  sendOutreachBatch: (applicationIds, dryRun = false) =>
-    request('/applications/send-outreach-batch', {
-      method: 'POST',
-      body: JSON.stringify({ application_ids: applicationIds, dry_run: dryRun }),
-    }),
+  generateOutreachDraft: (applicationId) =>
+    request(`/applications/${applicationId}/outreach-draft`, { method: 'POST' }),
   scheduleFollowUp: (applicationId, notes, scheduleNextDays = 7) =>
     request('/applications/follow-up', {
       method: 'POST',
@@ -191,15 +186,6 @@ export const api = {
   updateStatus: (applicationId, status) =>
     request(`/applications/${applicationId}/status?status=${status}`, { method: 'PATCH' }),
   getDashboardStats: () => request('/dashboard/stats'),
-  getOutreachEmails: (applicationId) => request(`/applications/${applicationId}/emails`),
-  getContacts: (applicationId) => request(`/applications/${applicationId}/contacts`),
-  findRecruitingEmails: (payload) =>
-    request('/recruiting-emails/find', { method: 'POST', body: JSON.stringify(payload) }),
-  updateCompanyDomain: (applicationId, companyDomain) =>
-    request(`/applications/${applicationId}/company-domain`, {
-      method: 'PATCH',
-      body: JSON.stringify({ company_domain: companyDomain }),
-    }),
   getAutomationRuns: () => request('/automation/runs'),
 
   // --- Automation loops ---

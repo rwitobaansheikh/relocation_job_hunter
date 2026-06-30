@@ -18,7 +18,6 @@ import Billing from './pages/Billing'
 import Settings from './pages/Settings'
 import Feedback from './pages/Feedback'
 import Admin from './pages/Admin'
-import RecruitingEmails from './pages/RecruitingEmails'
 import AuthCallback from './pages/AuthCallback'
 import HelpButton from './components/HelpButton'
 import PlanGate from './components/PlanGate'
@@ -80,10 +79,7 @@ function AppShell({ user, logout }) {
             {searching && <span className="nav-search-pulse" title="Search in progress" />}
           </NavLink>
           <NavLink to="/app/applications" onClick={closeNav}>Applications</NavLink>
-          <NavLink to="/app/recruiting-emails" onClick={closeNav}>Email Finder</NavLink>
-          <NavLink to="/app/automation" onClick={closeNav}>
-            Automation <span className="nav-soon">Soon</span>
-          </NavLink>
+          <NavLink to="/app/automation" onClick={closeNav}>Automation</NavLink>
           <NavLink to="/app/billing" onClick={closeNav}>Plan & Billing</NavLink>
           <NavLink to="/app/settings" onClick={closeNav}>Settings</NavLink>
           <NavLink to="/app/feedback" onClick={closeNav}>Feedback</NavLink>
@@ -150,7 +146,6 @@ export default function App() {
         <Route path="profile" element={<Profile />} />
         <Route path="jobs" element={<Jobs />} />
         <Route path="applications" element={<Applications />} />
-        <Route path="recruiting-emails" element={<RecruitingEmails />} />
         <Route path="automation" element={<Automation />} />
         <Route path="billing" element={<Billing />} />
         <Route path="settings" element={<Settings />} />

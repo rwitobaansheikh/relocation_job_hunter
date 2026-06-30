@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     # Safety ceiling for daily outbound emails per user (overridable per profile).
     default_daily_send_cap: int = 20
     default_per_domain_cap: int = 2
-    default_automation_interval_hours: int = 12
+    default_automation_interval_hours: int = 24
     default_max_tailor_per_run: int = 5
     # Global kill-switch for the automation scheduler (admin-controllable).
     automation_globally_enabled: bool = True

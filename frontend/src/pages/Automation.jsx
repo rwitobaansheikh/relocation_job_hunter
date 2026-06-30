@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../api'
 import HelpButton from '../components/HelpButton'
 import OnboardingGuide from '../components/OnboardingGuide'
@@ -7,21 +8,19 @@ const AUTOMATION_STEPS = [
   {
     step: 1,
     title: 'Pick one role & location',
-    body: 'Each loop will target a single job title and one country or city — e.g. "Machine Learning Engineer" in Netherlands.',
+    body: 'Each loop searches for a single job title in one country or city — e.g. "Machine Learning Engineer" in Netherlands.',
   },
   {
     step: 2,
-    title: 'Set your schedule',
-    body: 'Choose how often the loop runs and how many jobs to search and tailor per day.',
+    title: 'Run every 24 hours',
+    body: 'The loop searches job boards daily, saves matches, and auto-tailors CVs and cover letters.',
   },
   {
     step: 3,
-    title: 'Enable the loop',
-    body: 'Turn it on and the app will search and tailor documents automatically — apply on job sites when ready.',
+    title: 'Review your daily queue',
+    body: 'Jobs from automation appear under Applications → filter by automation date. You apply manually when ready.',
   },
 ]
-
-const AUTOMATION_COMING_SOON = true
 
 const SENIORITY_OPTIONS = [
   { value: 'intern', label: 'Internship' },
@@ -45,14 +44,12 @@ const emptyLoop = () => ({
   posted_within_hours: 48,
   min_salary: '',
   max_salary: '',
-  interval_hours: 12,
-  daily_send_cap: 5,
-  per_domain_cap: 2,
+  interval_hours: 24,
   max_tailor_per_run: 5,
   enabled: true,
 })
 
-function LoopForm({ initial, onCancel, onSave, saving, autoCap }) {
+function LoopForm({ initial, onCancel, onSave, saving }) {
   const [form, setForm] = useState(initial)
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }))
   const levels = (form.seniority_levels || '').split(',').map((s) => s.trim()).filter(Boolean)
@@ -74,10 +71,10 @@ function LoopForm({ initial, onCancel, onSave, saving, autoCap }) {
         </div>
         <div className="form-group">
           <label>Location (single country/city)</label>
-          <input 
-            value={form.locations} 
-            onChange={(e) => set('locations', e.target.value.replace(/,/g, ''))} 
-            placeholder="e.g. Netherlands — blank uses your profile countries" 
+          <input
+            value={form.locations}
+            onChange={(e) => set('locations', e.target.value.replace(/,/g, ''))}
+            placeholder="e.g. Netherlands — blank uses your profile countries"
           />
         </div>
         <div className="form-group">
@@ -96,15 +93,7 @@ function LoopForm({ initial, onCancel, onSave, saving, autoCap }) {
         </div>
         <div className="form-group">
           <label>Run every (hours)</label>
-          <input type="number" min="1" max="168" value={form.interval_hours} onChange={(e) => set('interval_hours', Number(e.target.value))} />
-        </div>
-        <div className="form-group">
-          <label>Auto applies / day {autoCap ? `(max ${autoCap})` : ''}</label>
-          <input type="number" min="0" max={autoCap || 500} value={form.daily_send_cap} onChange={(e) => set('daily_send_cap', Number(e.target.value))} />
-        </div>
-        <div className="form-group">
-          <label>Emails per company</label>
-          <input type="number" min="1" max="50" value={form.per_domain_cap} onChange={(e) => set('per_domain_cap', Number(e.target.value))} />
+          <input type="number" min="24" max="168" value={form.interval_hours} onChange={(e) => set('interval_hours', Number(e.target.value))} />
         </div>
         <div className="form-group">
           <label>Tailor per run</label>
@@ -135,7 +124,7 @@ function LoopForm({ initial, onCancel, onSave, saving, autoCap }) {
           disabled={saving || !form.role.trim()}
           onClick={() => onSave(form)}
           title="Save loop"
-          help="Saves this automation loop. It will search, tailor, and send applications on the schedule you set."
+          help="Saves this automation loop. It will search and tailor documents on the schedule you set."
         >
           {saving ? 'Saving…' : 'Save loop'}
         </HelpButton>
@@ -160,7 +149,7 @@ export default function Automation() {
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState(null)
   const [saving, setSaving] = useState(false)
-  const [editing, setEditing] = useState(null) // 'new' | loop id
+  const [editing, setEditing] = useState(null)
 
   const load = async () => {
     setLoading(true)
@@ -178,9 +167,11 @@ export default function Automation() {
   useEffect(() => { load() }, [])
 
   const normalize = (form) => {
-    const payload = { ...form }
+    const payload = { ...form, interval_hours: Math.max(24, Number(form.interval_hours) || 24) }
     payload.min_salary = form.min_salary === '' ? null : Number(form.min_salary)
     payload.max_salary = form.max_salary === '' ? null : Number(form.max_salary)
+    payload.daily_send_cap = 0
+    payload.per_domain_cap = 1
     return payload
   }
 
@@ -236,25 +227,16 @@ export default function Automation() {
   const activeCount = loops.filter((l) => l.enabled).length
   const canAutomate = maxLoops > 0
   const atCap = activeCount >= maxLoops
-  const autoCap = billing?.limits?.auto_per_loop_per_day
 
   return (
     <div>
       <h2 className="page-title">Automation</h2>
       <p className="page-subtitle">
-        Scheduled job search and document tailoring — email outreach and auto-apply coming later.
+        Search jobs every 24 hours and auto-tailor documents. Review results in{' '}
+        <Link to="/app/applications">Applications</Link> — you apply manually; we never send email.
       </p>
 
-      {AUTOMATION_COMING_SOON && (
-        <div className="alert alert-info" style={{ marginBottom: '1.5rem' }}>
-          <strong>Coming soon.</strong> For now, use{' '}
-          <a href="/app/jobs">Search Jobs</a> and{' '}
-          <a href="/app/applications">Applications</a> to find roles, tailor your CV and cover letter,
-          and apply manually on each job site.
-        </div>
-      )}
-
-      {loops.length === 0 && editing !== 'new' && !AUTOMATION_COMING_SOON && (
+      {loops.length === 0 && editing !== 'new' && (
         <OnboardingGuide
           storageKey="jh_onboarding_automation"
           title="Setting up your first automation loop"
@@ -268,19 +250,16 @@ export default function Automation() {
         <div>
           <strong>{activeCount} / {maxLoops}</strong> active loops on the{' '}
           <span style={{ textTransform: 'capitalize' }}>{billing?.plan}</span> plan
-          {autoCap ? ` · up to ${autoCap} auto applies/loop/day` : ''}
         </div>
-        {AUTOMATION_COMING_SOON ? (
-          <span className="muted" style={{ fontSize: '0.9rem' }}>New loops — coming soon</span>
-        ) : !canAutomate ? (
-          <a className="btn-primary" href="/app/billing">Upgrade to enable automation</a>
+        {!canAutomate ? (
+          <Link className="btn-primary" to="/app/billing">Upgrade to enable automation</Link>
         ) : (
           <HelpButton
             className="btn-primary"
             disabled={editing === 'new' || atCap}
             onClick={() => setEditing('new')}
             title="Add loop"
-            help="Create a new automation loop that searches one role on a timer, tailors documents, and sends applications for you."
+            help="Create a loop that searches one role daily and tailors documents automatically."
           >
             + Add loop
           </HelpButton>
@@ -289,12 +268,12 @@ export default function Automation() {
 
       {atCap && canAutomate && (
         <div className="alert alert-info">
-          You've reached your plan's loop limit. <a href="/app/billing">Upgrade</a> for more, or disable a loop.
+          You've reached your plan's loop limit. <Link to="/app/billing">Upgrade</Link> for more, or disable a loop.
         </div>
       )}
 
-      {editing === 'new' && !AUTOMATION_COMING_SOON && (
-        <LoopForm initial={emptyLoop()} autoCap={autoCap} saving={saving} onCancel={() => setEditing(null)} onSave={saveNew} />
+      {editing === 'new' && (
+        <LoopForm initial={emptyLoop()} saving={saving} onCancel={() => setEditing(null)} onSave={saveNew} />
       )}
 
       {loops.length === 0 && editing !== 'new' ? (
@@ -309,8 +288,8 @@ export default function Automation() {
                   ...loop,
                   min_salary: loop.min_salary ?? '',
                   max_salary: loop.max_salary ?? '',
+                  interval_hours: Math.max(24, loop.interval_hours || 24),
                 }}
-                autoCap={autoCap}
                 saving={saving}
                 onCancel={() => setEditing(null)}
                 onSave={(form) => saveEdit(loop.id, form)}
@@ -321,42 +300,27 @@ export default function Automation() {
                   <div className="application-card__info">
                     <h3>{loop.name || loop.role || 'Untitled loop'}</h3>
                     <p className="application-card__meta">
-                      {loop.role || 'Any role'} · {loop.locations || 'profile countries'} · every {loop.interval_hours}h
+                      {loop.role || 'Any role'} · {loop.locations || 'profile countries'} · every {Math.max(24, loop.interval_hours || 24)}h
                     </p>
                     <div className="application-card__tags">
                       <span className={`badge badge-${loop.enabled ? 'applied' : 'rejected'}`}>
                         {loop.enabled ? 'enabled' : 'disabled'}
                       </span>
                       <span className="muted" style={{ fontSize: '0.85rem' }}>
-                        up to {loop.daily_send_cap}/day
+                        up to {loop.max_tailor_per_run} tailored/run
                         {loop.last_run_at && ` · last run ${new Date(loop.last_run_at).toLocaleString()}`}
                       </span>
                     </div>
                   </div>
                 </header>
                 <div className="application-card__primary">
-                  <HelpButton
-                    className="btn-secondary"
-                    onClick={() => toggle(loop)}
-                    title={loop.enabled ? 'Disable' : 'Enable'}
-                    help={loop.enabled ? 'Pause this loop.' : 'Resume this loop.'}
-                  >
+                  <HelpButton className="btn-secondary" onClick={() => toggle(loop)} title={loop.enabled ? 'Disable' : 'Enable'} help={loop.enabled ? 'Pause this loop.' : 'Resume this loop.'}>
                     {loop.enabled ? 'Disable' : 'Enable'}
                   </HelpButton>
-                  <HelpButton
-                    className="btn-secondary"
-                    onClick={() => setEditing(loop.id)}
-                    title="Edit"
-                    help="Change role, location, schedule, or daily limits."
-                  >
+                  <HelpButton className="btn-secondary" onClick={() => setEditing(loop.id)} title="Edit" help="Change role, location, schedule, or tailor limits.">
                     Edit
                   </HelpButton>
-                  <HelpButton
-                    className="btn-danger"
-                    onClick={() => remove(loop)}
-                    title="Delete"
-                    help="Remove this loop permanently."
-                  >
+                  <HelpButton className="btn-danger" onClick={() => remove(loop)} title="Delete" help="Remove this loop permanently.">
                     Delete
                   </HelpButton>
                 </div>
@@ -379,7 +343,6 @@ export default function Automation() {
                   <th>Status</th>
                   <th>New jobs</th>
                   <th>Tailored</th>
-                  <th>Sent</th>
                   <th>Detail</th>
                 </tr>
               </thead>
@@ -394,7 +357,6 @@ export default function Automation() {
                     </td>
                     <td>{r.jobs_found}</td>
                     <td>{r.jobs_tailored}</td>
-                    <td>{r.emails_sent}</td>
                     <td className="muted" style={{ maxWidth: 280, whiteSpace: 'normal' }}>{r.detail}</td>
                   </tr>
                 ))}

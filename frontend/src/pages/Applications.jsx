@@ -5,7 +5,7 @@ import DidYouApplyModal from '../components/DidYouApplyModal'
 import JobDescription from '../components/JobDescription'
 import HelpButton from '../components/HelpButton'
 import OnboardingGuide from '../components/OnboardingGuide'
-import OutreachPanel from '../components/OutreachPanel'
+import OutreachDraftPanel from '../components/OutreachDraftPanel'
 import TailoredDocuments from '../components/TailoredDocuments'
 import { useProfile } from '../ProfileContext'
 
@@ -33,11 +33,16 @@ const FIRST_APP_STEPS = [
   },
   {
     step: 4,
-    title: 'Apply or email outreach',
-    body: 'Apply on the job site, or find recruiter emails and send your tailored documents directly.',
+    title: 'Apply on the job site',
+    body: 'Open the listing, upload your tailored documents, and mark the application as applied when done.',
   },
   {
     step: 5,
+    title: 'Optional: outreach draft',
+    body: 'Generate a cold email draft to copy into your own inbox — the app never sends email for you.',
+  },
+  {
+    step: 6,
     title: 'Track status',
     body: 'Mark applications as applied, rejected, or follow up as you hear back.',
   },
@@ -53,6 +58,8 @@ export default function Applications() {
   const [applications, setApplications] = useState([])
   const [filter, setFilter] = useState('')
   const [sortBy, setSortBy] = useState('')
+  const [queueFilter, setQueueFilter] = useState('')
+  const [automationBatches, setAutomationBatches] = useState([])
   const [loading, setLoading] = useState(true)
   const [actionMsg, setActionMsg] = useState(null)
   const [busy, setBusy] = useState(null)
@@ -60,7 +67,7 @@ export default function Applications() {
   const [expandedAnalysis, setExpandedAnalysis] = useState(null)
   const [expandedDesc, setExpandedDesc] = useState(null)
   const [expandedDocs, setExpandedDocs] = useState(null)
-  const [expandedOutreach, setExpandedOutreach] = useState(null)
+  const [expandedDraft, setExpandedDraft] = useState(null)
   const [viewMode, setViewMode] = useState('table')
 
   const parseAnalysis = (app) => {
@@ -75,13 +82,18 @@ export default function Applications() {
     if (!profile?.id) return
     setLoading(true)
     try {
-      const apps = await api.getApplications(filter || undefined, sortBy || undefined)
+      const options = {}
+      if (queueFilter === 'manual') options.manualOnly = true
+      else if (queueFilter.startsWith('auto:')) options.automationBatch = queueFilter.slice(5)
+      const apps = await api.getApplications(filter || undefined, sortBy || undefined, options)
       setApplications(apps)
+      const batches = await api.getAutomationBatches().catch(() => [])
+      setAutomationBatches(batches)
     } catch (err) {
       console.error(err)
     }
     setLoading(false)
-  }, [profile, filter, sortBy])
+  }, [profile, filter, sortBy, queueFilter])
 
   useEffect(() => { loadApps() }, [loadApps])
 
@@ -190,7 +202,7 @@ export default function Applications() {
       if (expandedDocs === app.id) setExpandedDocs(null)
       if (expandedDesc === app.id) setExpandedDesc(null)
       if (expandedAnalysis === app.id) setExpandedAnalysis(null)
-      if (expandedOutreach === app.id) setExpandedOutreach(null)
+      if (expandedDraft === app.id) setExpandedDraft(null)
       setActionMsg({ type: 'success', text: `Removed "${label}".` })
       await loadApps()
     } catch (err) {
@@ -246,11 +258,11 @@ export default function Applications() {
     setExpandedDocs((prev) => (prev === appId ? null : appId))
     setExpandedDesc(null)
     setExpandedAnalysis(null)
-    setExpandedOutreach(null)
+    setExpandedDraft(null)
   }
 
-  const toggleOutreach = (appId) => {
-    setExpandedOutreach((prev) => (prev === appId ? null : appId))
+  const toggleDraft = (appId) => {
+    setExpandedDraft((prev) => (prev === appId ? null : appId))
     setExpandedDesc(null)
     setExpandedAnalysis(null)
     setExpandedDocs(null)
@@ -260,14 +272,14 @@ export default function Applications() {
     setExpandedDesc((prev) => (prev === appId ? null : appId))
     setExpandedDocs(null)
     setExpandedAnalysis(null)
-    setExpandedOutreach(null)
+    setExpandedDraft(null)
   }
 
   const toggleAnalysis = (appId) => {
     setExpandedAnalysis((prev) => (prev === appId ? null : appId))
     setExpandedDocs(null)
     setExpandedDesc(null)
-    setExpandedOutreach(null)
+    setExpandedDraft(null)
   }
 
   const renderExpandedPanels = (app) => (
@@ -279,21 +291,11 @@ export default function Applications() {
         onClose={() => setExpandedDocs(null)}
         onApply={() => handleManualApply(app)}
       />
-      <OutreachPanel
+      <OutreachDraftPanel
         applicationId={app.id}
         companyName={app.job?.company}
-        companyDomain={app.job?.company_domain}
-        open={expandedOutreach === app.id}
-        onSent={loadApps}
-        onDomainUpdated={(domain) => {
-          setApplications((prev) =>
-            prev.map((a) =>
-              a.id === app.id && a.job
-                ? { ...a, job: { ...a.job, company_domain: domain } }
-                : a,
-            ),
-          )
-        }}
+        jobTitle={app.job?.title}
+        open={expandedDraft === app.id}
       />
       {expandedDesc === app.id && (
         <div className="application-card__panel">
@@ -350,7 +352,7 @@ export default function Applications() {
         </div>
       </div>
       <p className="page-subtitle">
-        Tailor CVs and cover letters per role, apply on job sites, or find recruiter emails and send outreach.
+        Search matches land here. Tailor CVs and cover letters, apply on job sites, and optionally draft outreach emails to send yourself.
       </p>
 
       {showOnboarding && (
@@ -367,6 +369,13 @@ export default function Applications() {
         <select value={filter} onChange={(e) => setFilter(e.target.value)} className="status-filter">
           {STATUS_OPTIONS.map((s) => (
             <option key={s} value={s}>{s ? s.replace('_', ' ') : 'All statuses'}</option>
+          ))}
+        </select>
+        <select value={queueFilter} onChange={(e) => setQueueFilter(e.target.value)} className="status-filter" aria-label="Application queue">
+          <option value="">All jobs</option>
+          <option value="manual">Manual searches only</option>
+          {automationBatches.map((date) => (
+            <option key={date} value={`auto:${date}`}>Automation · {date}</option>
           ))}
         </select>
         <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="status-filter" aria-label="Sort applications">
@@ -431,8 +440,8 @@ export default function Applications() {
                         <button type="button" className="btn-secondary btn-sm" onClick={() => toggleDocs(app.id)}>
                           Docs
                         </button>
-                        <button type="button" className="btn-secondary btn-sm" onClick={() => toggleOutreach(app.id)}>
-                          Outreach
+                        <button type="button" className="btn-secondary btn-sm" onClick={() => toggleDraft(app.id)}>
+                          Email draft
                         </button>
                       </>
                     )}
@@ -470,6 +479,9 @@ export default function Applications() {
                   </p>
                   <div className="application-card__tags">
                     <span className={`badge badge-${app.status}`}>{app.status.replace('_', ' ')}</span>
+                    {app.automation_batch_date && (
+                      <span className="badge badge-discovered">Auto · {app.automation_batch_date}</span>
+                    )}
                   </div>
                 </div>
                 <select
@@ -490,9 +502,6 @@ export default function Applications() {
                   <button type="button" className="btn-secondary btn-sm" onClick={() => toggleDocs(app.id)}>
                     {expandedDocs === app.id ? 'Hide documents' : 'Preview & download'}
                   </button>
-                  <button type="button" className="btn-secondary btn-sm" onClick={() => toggleOutreach(app.id)}>
-                    {expandedOutreach === app.id ? 'Hide outreach' : 'Email outreach'}
-                  </button>
                 </div>
               )}
 
@@ -505,7 +514,7 @@ export default function Applications() {
                     title="Tailor documents"
                     help="AI generates a CV360-style CV and cover letter tailored to this job."
                   >
-                    {busy === app.id ? 'Tailoring…' : '1. Tailor CV & cover letter'}
+                    {busy === app.id ? 'Tailoring…' : 'Tailor documents'}
                   </HelpButton>
                 )}
                 {hasTailoredDocs(app) && (
@@ -516,15 +525,15 @@ export default function Applications() {
                       title="Preview documents"
                       help="Review, edit, and download your tailored Word documents."
                     >
-                      2. Preview & download
+                      Preview & download
                     </HelpButton>
                     <HelpButton
                       className="btn-secondary"
-                      onClick={() => toggleOutreach(app.id)}
-                      title="Email outreach"
-                      help="Find recruiter emails via SMTP verification and send your tailored documents."
+                      onClick={() => toggleDraft(app.id)}
+                      title="Generate outreach email"
+                      help="Draft a cold email to copy into your inbox. The app does not send email."
                     >
-                      3. Email outreach
+                      Generate outreach email
                     </HelpButton>
                   </>
                 )}
@@ -533,7 +542,7 @@ export default function Applications() {
                   onApply={() => handleManualApply(app)}
                   busy={busy === `apply-${app.id}`}
                   className="btn-primary"
-                  label={hasTailoredDocs(app) ? '4. Apply on job site' : 'View job listing'}
+                  label={hasTailoredDocs(app) ? 'Apply on job site' : 'View job listing'}
                 />
               </div>
 

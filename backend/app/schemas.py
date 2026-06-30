@@ -238,7 +238,7 @@ class AutomationLoopCreate(BaseModel):
     posted_within_hours: int = Field(default=48, ge=1, le=2160)
     min_salary: Optional[int] = Field(default=None, ge=0)
     max_salary: Optional[int] = Field(default=None, ge=0)
-    interval_hours: int = Field(default=12, ge=1, le=168)
+    interval_hours: int = Field(default=24, ge=1, le=168)
     daily_send_cap: int = Field(default=5, ge=0, le=500)
     per_domain_cap: int = Field(default=2, ge=1, le=50)
     max_tailor_per_run: int = Field(default=5, ge=1, le=50)
@@ -383,6 +383,7 @@ class JobApplicationResponse(BaseModel):
     applied_at: Optional[datetime]
     last_follow_up_at: Optional[datetime]
     next_follow_up_at: Optional[datetime]
+    automation_batch_date: str = ""
     created_at: datetime
     updated_at: datetime
     job: Optional[JobResponse] = None
@@ -500,6 +501,11 @@ class SendOutreachRequest(BaseModel):
 class SendOutreachBatchRequest(BaseModel):
     application_ids: list[int] = Field(min_length=1, max_length=50)
     dry_run: bool = False
+
+
+class OutreachDraftResponse(BaseModel):
+    subject: str
+    body: str
 
 
 class FollowUpRequest(BaseModel):

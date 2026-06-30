@@ -155,6 +155,7 @@ class JobApplication(Base):
     applied_at = Column(DateTime, nullable=True)
     last_follow_up_at = Column(DateTime, nullable=True)
     next_follow_up_at = Column(DateTime, nullable=True)
+    automation_batch_date = Column(String(10), default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -294,6 +295,7 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
     "job_applications": {
         "ai_match_score": "INTEGER DEFAULT 0",
         "analysis_json": "TEXT DEFAULT ''",
+        "automation_batch_date": "VARCHAR(10) DEFAULT ''",
     },
     "jobs": {
         "seniority_level": "VARCHAR(20) DEFAULT ''",
