@@ -334,7 +334,7 @@ def _apply_checkout_session(db: Session, session: dict) -> None:
         except Exception as exc:
             logger.warning("Could not read checkout line items: %s", exc)
 
-    sub = client.Subscription.retrieve(sub_id, expand=["items.data.price"])
+    sub = client.Subscription.retrieve(sub_id)
     payment_status = session.get("payment_status") or ""
     amount = session.get("amount_total")
     currency = session.get("currency") or "usd"
@@ -404,7 +404,6 @@ def sync_user_subscription(db: Session, user: User) -> bool:
                 customer=user.stripe_customer_id,
                 status=status,
                 limit=1,
-                expand=["data.items.data.price"],
             )
             if subs and subs.data:
                 _apply_subscription(db, subs.data[0])
@@ -415,7 +414,6 @@ def sync_user_subscription(db: Session, user: User) -> bool:
             customer=user.stripe_customer_id,
             status="all",
             limit=5,
-            expand=["data.items.data.price"],
         )
         for sub in subs.data or []:
             if sub.get("status") in ("active", "trialing"):
@@ -462,7 +460,7 @@ def handle_webhook(db: Session, payload: bytes, sig_header: str) -> str:
         billing_reason = obj.get("billing_reason") or ""
 
         if sub_id:
-            sub = client.Subscription.retrieve(sub_id, expand=["items.data.price"])
+            sub = client.Subscription.retrieve(sub_id)
             notify = amount_paid > 0 and billing_reason in (
                 "subscription_create",
                 "subscription_update",
