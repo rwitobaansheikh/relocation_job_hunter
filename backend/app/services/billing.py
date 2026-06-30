@@ -228,7 +228,8 @@ def _maybe_send_subscription_email(
         payment_currency=payment_currency,
         trialing=status == "trialing" and not paid,
     )
-    user.subscription_email_key = email_key
+    if hasattr(user, "subscription_email_key"):
+        user.subscription_email_key = email_key
     db.commit()
     _schedule_system_email(to, subject, text, html)
     logger.info("Subscription confirmation email queued for user %s tier=%s", user.id, tier)
@@ -292,15 +293,18 @@ def _apply_subscription(
     db.refresh(user)
 
     if notify:
-        _maybe_send_subscription_email(
-            db,
-            user,
-            tier=tier or "",
-            subscription_id=subscription_id or "",
-            status=status,
-            payment_amount_cents=payment_amount_cents,
-            payment_currency=payment_currency,
-        )
+        try:
+            _maybe_send_subscription_email(
+                db,
+                user,
+                tier=tier or "",
+                subscription_id=subscription_id or "",
+                status=status,
+                payment_amount_cents=payment_amount_cents,
+                payment_currency=payment_currency,
+            )
+        except Exception as e:
+            logger.warning("Failed to send subscription email for user %s: %s", user.id, e)
 
     return user
 
@@ -416,7 +420,7 @@ def sync_user_subscription(db: Session, user: User) -> bool:
             limit=5,
         )
         for sub in subs.data or []:
-            if sub.get("status") in ("active", "trialing"):
+            if sub.get("status") in ("active", "trialing", "incomplete"):
                 _apply_subscription(db, sub)
                 db.refresh(user)
                 return True

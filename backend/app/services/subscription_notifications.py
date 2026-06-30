@@ -69,4 +69,4 @@ def send_subscription_confirmation_email(
 def should_send_subscription_email(user: User, tier: str, email_key: str) -> bool:
     if tier not in PAID_PLANS:
         return False
-    return (user.subscription_email_key or "") != email_key
+    return getattr(user, "subscription_email_key", "") != email_key
