@@ -103,10 +103,10 @@ def get_billing(
             llm_per_day=limits.llm_per_day,
         ),
         usage=BillingUsage(
-            manual_today=manual_today, 
+            manual_today=manual_today,
             loops_active=loops_active,
             tailor_today=tailor_today,
-            llm_today=llm_today
+            llm_today=llm_today,
         ),
         tiers=_tiers_for_country(country),
     )
@@ -171,7 +171,17 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
     try:
-        etype = billing.handle_webhook(db, payload, sig)
+        result = billing.handle_webhook(db, payload, sig)
     except billing.BillingError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return {"received": True, "type": etype}
+
+    etype = result.get("type")
+    # A plan-affecting event that applied nothing means we received a payment but
+    # failed to update the user. Respond 422 so the failure is visible in the
+    # Stripe dashboard and retried, instead of silently returning 200.
+    if etype in billing._PLAN_APPLYING_EVENTS and not result.get("applied"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Webhook {etype} applied no change: {result.get('reason')}",
+        )
+    return {"received": True, "type": etype, "applied": result.get("applied")}
