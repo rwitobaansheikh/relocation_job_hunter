@@ -29,6 +29,14 @@ export function ProfileProvider({ children }) {
       .finally(() => setLoading(false))
   }, [user])
 
+  useEffect(() => {
+    const onPlanUpdated = () => {
+      refreshProfile().catch(() => {})
+    }
+    window.addEventListener('plan:updated', onPlanUpdated)
+    return () => window.removeEventListener('plan:updated', onPlanUpdated)
+  }, [refreshProfile])
+
   return (
     <ProfileContext.Provider value={{ profile, setProfile, loading, refreshProfile }}>
       {children}

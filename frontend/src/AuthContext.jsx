@@ -20,12 +20,30 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false))
   }, [])
 
+  const refreshUser = useCallback(async () => {
+    try {
+      const updated = await api.me()
+      setUser(updated)
+      return updated
+    } catch (err) {
+      return null
+    }
+  }, [])
+
   // The API client dispatches this when any request returns 401.
   useEffect(() => {
     const onUnauthorized = () => setUser(null)
     window.addEventListener('auth:unauthorized', onUnauthorized)
     return () => window.removeEventListener('auth:unauthorized', onUnauthorized)
   }, [])
+
+  useEffect(() => {
+    const onPlanUpdated = () => {
+      refreshUser().catch(() => {})
+    }
+    window.addEventListener('plan:updated', onPlanUpdated)
+    return () => window.removeEventListener('plan:updated', onPlanUpdated)
+  }, [refreshUser])
 
   const login = useCallback(async (email, password) => {
     const res = await api.login({ email, password })
