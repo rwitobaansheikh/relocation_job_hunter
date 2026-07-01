@@ -367,10 +367,22 @@ def _apply_subscription(
     """Mirror a Stripe subscription object onto the matching User."""
     customer_id = _stripe_id(subscription.get("customer"))
     metadata = subscription.get("metadata") or {}
+    customer_email = None
+    if customer_id and is_configured():
+        try:
+            cust = _client().Customer.retrieve(customer_id)
+            customer_email = (cust.get("email") if hasattr(cust, "get") else None) or None
+        except Exception as exc:
+            logger.warning(
+                "Could not retrieve customer %s for subscription email fallback: %s",
+                customer_id,
+                exc,
+            )
     user = _resolve_user(
         db,
         customer_id=customer_id or None,
         user_id=metadata.get("user_id"),
+        customer_email=customer_email,
     )
     if not user:
         reason = f"user_not_found (customer={customer_id} user_id={metadata.get('user_id')})"
@@ -690,10 +702,6 @@ def force_sync_user_from_stripe(db: Session, user: User) -> bool:
                     limit=5,
                 )
                 for sub in subs.data or []:
-                    meta = sub.get("metadata") or {}
-                    meta_uid = meta.get("user_id")
-                    if meta_uid and str(meta_uid) != str(user.id):
-                        continue
                     _apply_subscription(db, sub)
                     db.refresh(user)
                     updated = True
@@ -712,10 +720,6 @@ def force_sync_user_from_stripe(db: Session, user: User) -> bool:
                     "incomplete",
                     "past_due",
                 ):
-                    continue
-                meta = sub.get("metadata") or {}
-                meta_uid = meta.get("user_id")
-                if meta_uid and str(meta_uid) != str(user.id):
                     continue
                 _apply_subscription(db, sub)
                 db.refresh(user)
