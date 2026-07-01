@@ -1,9 +1,31 @@
-# Dev stack overlay — deployed to /opt/app-dev on the EC2 host.
+# Dev stack — deployed to /opt/app-dev on the EC2 host.
+# Self-contained (no merge with docker-compose.yml) so deploy is not sensitive
+# to compose override/merge behaviour on the host.
 # Listens on port 8080 with a separate SQLite DB and file storage under /data-dev.
-# Add a Cloudflare Tunnel route: dev.jobapplicationflow.com -> http://127.0.0.1:8080
+# Cloudflare Tunnel route: dev.jobapplicationflow.com -> http://127.0.0.1:8080
 services:
   app:
-    ports: !override
+    image: ${ECR_IMAGE:?ECR_IMAGE must be set in .env}
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
       - "8080:8000"
-    volumes: !override
+    volumes:
       - /data-dev:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  ollama:
+    profiles: ["ollama"]
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  ollama_data:

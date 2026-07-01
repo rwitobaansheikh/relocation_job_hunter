@@ -58,10 +58,12 @@ jobs:
           IMAGE: ${{ steps.image.outputs.image }}
         run: |
           mkdir -p deploy_bundle
-          cp docker-compose.yml deploy_bundle/docker-compose.yml
           cp docker-compose.dev.yml deploy_bundle/docker-compose.dev.yml
-          printf '%s\n' "$APP_ENV" > deploy_bundle/.env
+          # Strip any stale ECR_IMAGE from the secret; workflow always sets the fresh tag.
+          printf '%s\n' "$APP_ENV" | grep -v '^ECR_IMAGE=' > deploy_bundle/.env
           echo "ECR_IMAGE=$IMAGE" >> deploy_bundle/.env
+          test -n "$IMAGE"
+          grep -q "^ECR_IMAGE=" deploy_bundle/.env
 
       - name: Open ephemeral SSH for this runner
         id: ssh_access
@@ -99,7 +101,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: "deploy_bundle/docker-compose.yml,deploy_bundle/docker-compose.dev.yml,deploy_bundle/.env"
+          source: "deploy_bundle/docker-compose.dev.yml,deploy_bundle/.env"
           target: "/opt/app-dev"
           strip_components: 1
           timeout: 60s
@@ -118,10 +120,15 @@ jobs:
             cd /opt/app-dev
             aws ecr get-login-password --region ${{ env.AWS_REGION }} \
               | docker login --username AWS --password-stdin "$(echo "${{ steps.image.outputs.image }}" | cut -d'/' -f1)"
-            COMPOSE="-p app-dev -f docker-compose.yml -f docker-compose.dev.yml"
+            if ! grep -qE '^ECR_IMAGE=.+' .env; then
+              echo "ECR_IMAGE missing or empty in /opt/app-dev/.env"
+              exit 1
+            fi
+            COMPOSE="-p app-dev -f docker-compose.dev.yml"
             if grep -qE '^LLM_PROVIDER=ollama' .env; then
               COMPOSE="$COMPOSE --profile ollama"
             fi
+            docker compose $COMPOSE config >/dev/null
             docker compose $COMPOSE pull
             docker compose $COMPOSE up -d --remove-orphans
             docker image prune -f
