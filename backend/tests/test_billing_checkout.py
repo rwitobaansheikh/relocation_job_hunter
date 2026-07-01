@@ -88,6 +88,50 @@ def test_current_plan_prefers_paid_plan_column():
     assert current_plan(user) == "standard"
 
 
+def test_apply_checkout_session_sends_confirmation_email_once():
+    user = FakeUser()
+    user.subscription_email_key = ""
+    db = MagicMock()
+
+    session = {
+        "id": "cs_test_123",
+        "customer": "cus_abc",
+        "subscription": "sub_abc",
+        "metadata": {"user_id": "42", "tier": "basic"},
+        "client_reference_id": "42",
+        "payment_status": "paid",
+        "amount_total": 1500,
+        "currency": "usd",
+    }
+    sub = {
+        "id": "sub_abc",
+        "customer": "cus_abc",
+        "status": "active",
+        "metadata": {"user_id": "42", "tier": "basic"},
+        "items": {"data": [{"price": "price_basic"}]},
+    }
+
+    with patch("app.services.billing._resolve_user", return_value=user), patch(
+        "app.services.billing._client"
+    ) as mock_client, patch("app.services.billing.settings") as mock_settings, patch(
+        "app.services.billing._schedule_system_email"
+    ) as mock_send:
+        mock_settings.stripe_price_basic = "price_basic"
+        mock_settings.stripe_price_standard = "price_standard"
+        mock_settings.stripe_price_pro = "price_pro"
+        mock_client.return_value.Subscription.retrieve.return_value = sub
+
+        _apply_checkout_session(db, session, user=user)
+        assert mock_send.call_count == 1
+        to = mock_send.call_args[0][0]
+        assert to == user.email
+
+        # Re-applying the same checkout (e.g. webhook after redirect) must not
+        # send a duplicate email.
+        _apply_checkout_session(db, session, user=user)
+        assert mock_send.call_count == 1
+
+
 def test_sync_from_checkout_session_retries_until_upgraded():
     user = FakeUser()
     db = MagicMock()

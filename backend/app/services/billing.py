@@ -7,6 +7,7 @@ mirrored onto the User row via webhooks so plan resolution is local + fast.
 
 import asyncio
 import logging
+import threading
 import time
 from datetime import datetime
 from typing import Any, Optional
@@ -30,6 +31,15 @@ _PRICE_BY_TIER = {
     "standard": lambda: settings.stripe_price_standard,
     "pro": lambda: settings.stripe_price_pro,
 }
+
+# Webhook events that must result in a plan change on some user. If one of
+# these applies nothing, the webhook route returns 422 so Stripe retries.
+_PLAN_APPLYING_EVENTS = (
+    "checkout.session.completed",
+    "customer.subscription.created",
+    "customer.subscription.updated",
+    "invoice.payment_succeeded",
+)
 
 
 class BillingError(Exception):
@@ -307,7 +317,9 @@ def _schedule_system_email(to: str, subject: str, text: str, html: str | None) -
         loop = asyncio.get_running_loop()
         loop.create_task(_send())
     except RuntimeError:
-        asyncio.run(_send())
+        # Sync request context (threadpool): send in a background thread so the
+        # HTTP response isn't blocked on SMTP delivery.
+        threading.Thread(target=lambda: asyncio.run(_send()), daemon=True).start()
 
 
 def _maybe_send_subscription_email(
@@ -386,6 +398,11 @@ def _apply_subscription(
     user.stripe_subscription_id = subscription_id
 
     period_end = _obj_get(subscription, "current_period_end")
+    if not period_end:
+        # Stripe API 2025-03-31+ moved current_period_end onto subscription items.
+        items_for_period = _subscription_items(subscription)
+        if items_for_period:
+            period_end = _obj_get(items_for_period[0], "current_period_end")
     if period_end:
         user.current_period_end = datetime.utcfromtimestamp(period_end)
 
@@ -435,8 +452,10 @@ def _apply_subscription(
 
 def _apply_checkout_session(
     db: Session, session: dict, *, user: User | None = None
-) -> None:
-    """Apply plan changes immediately after Stripe Checkout completes."""
+) -> User | None:
+    """Apply plan changes immediately after Stripe Checkout completes.
+
+    Returns the affected user when a plan/linkage change was applied."""
     metadata = _obj_get(session, "metadata") or {}
     tier_hint = _obj_get(metadata, "tier")
     customer_id = _stripe_id(_obj_get(session, "customer"))
@@ -457,7 +476,7 @@ def _apply_checkout_session(
             customer_id,
             user_id,
         )
-        return
+        return None
     user = resolved
 
     if customer_id:
@@ -516,8 +535,25 @@ def _apply_checkout_session(
             user.plan,
         )
 
+    # Queue the confirmation email straight from the checkout result so it goes
+    # out even if the follow-up Subscription.retrieve call below fails. The
+    # subscription_email_key dedupe prevents a second send from webhooks.
+    if checkout_complete and user.plan in PAID_PLANS:
+        try:
+            _maybe_send_subscription_email(
+                db,
+                user,
+                tier=user.plan,
+                subscription_id=sub_id or f"checkout:{_obj_get(session, 'id', '')}",
+                status=user.plan_status or "active",
+                payment_amount_cents=paid_cents,
+                payment_currency=currency,
+            )
+        except Exception as exc:
+            logger.warning("Failed to send checkout email for user %s: %s", user.id, exc)
+
     if not sub_id:
-        return
+        return user
 
     try:
         sub = client.Subscription.retrieve(sub_id)
@@ -539,6 +575,7 @@ def _apply_checkout_session(
             sub_id,
             exc,
         )
+    return user
 
 
 def sync_from_checkout_session(db: Session, user: User, session_id: str) -> bool:
@@ -619,7 +656,32 @@ def sync_user_subscription(db: Session, user: User) -> bool:
     return force_sync_user_from_stripe(db, user)
 
 
-def handle_webhook(db: Session, payload: bytes, sig_header: str) -> str:
+def _invoice_subscription_id(invoice: Any) -> str:
+    """Subscription id from an invoice across Stripe API versions.
+
+    Older API versions expose it as invoice.subscription; 2025-03-31+ moved it
+    to invoice.parent.subscription_details.subscription."""
+    sub_id = _stripe_id(_obj_get(invoice, "subscription"))
+    if sub_id:
+        return sub_id
+    parent = _obj_get(invoice, "parent") or {}
+    details = _obj_get(parent, "subscription_details") or {}
+    sub_id = _stripe_id(_obj_get(details, "subscription"))
+    if sub_id:
+        return sub_id
+    lines = _obj_get(invoice, "lines") or {}
+    for line in _obj_get(lines, "data") or []:
+        line_parent = _obj_get(line, "parent") or {}
+        item_details = _obj_get(line_parent, "subscription_item_details") or {}
+        sub_id = _stripe_id(_obj_get(item_details, "subscription"))
+        if sub_id:
+            return sub_id
+    return ""
+
+
+def handle_webhook(db: Session, payload: bytes, sig_header: str) -> dict:
+    """Process a Stripe webhook. Returns {"type", "applied", "reason"} so the
+    route can surface plan-applying events that changed nothing."""
     client = _client()
     if not settings.stripe_webhook_secret:
         raise BillingError("Webhook secret not configured")
@@ -632,13 +694,18 @@ def handle_webhook(db: Session, payload: bytes, sig_header: str) -> str:
 
     etype = event["type"]
     obj = event["data"]["object"]
+    applied = False
+    reason = ""
 
     if etype in (
         "customer.subscription.created",
         "customer.subscription.updated",
         "customer.subscription.deleted",
     ):
-        _apply_subscription(db, obj, notify=etype == "customer.subscription.created")
+        user = _apply_subscription(db, obj, notify=etype == "customer.subscription.created")
+        applied = user is not None
+        if not applied:
+            reason = "no matching user for subscription customer"
     elif etype == "checkout.session.completed":
         session = obj
         sid = _obj_get(obj, "id")
@@ -647,15 +714,21 @@ def handle_webhook(db: Session, payload: bytes, sig_header: str) -> str:
                 session = client.checkout.Session.retrieve(sid)
             except Exception as exc:
                 logger.warning("Could not retrieve checkout session for webhook: %s", exc)
-        _apply_checkout_session(db, session)
+        user = _apply_checkout_session(db, session)
+        applied = user is not None
+        if not applied:
+            reason = "no matching user for checkout session"
     elif etype == "invoice.payment_failed":
         customer_id = _stripe_id(_obj_get(obj, "customer"))
         user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
         if user:
             user.plan_status = "past_due"
             db.commit()
+            applied = True
+        else:
+            reason = "no matching user for invoice customer"
     elif etype == "invoice.payment_succeeded":
-        sub_id = _stripe_id(_obj_get(obj, "subscription"))
+        sub_id = _invoice_subscription_id(obj)
         amount_paid = _obj_get(obj, "amount_paid") or 0
         currency = _obj_get(obj, "currency") or "usd"
         billing_reason = _obj_get(obj, "billing_reason") or ""
@@ -667,29 +740,39 @@ def handle_webhook(db: Session, payload: bytes, sig_header: str) -> str:
                 "subscription_update",
                 "subscription_cycle",
             )
-            _apply_subscription(
+            user = _apply_subscription(
                 db,
                 sub,
                 notify=notify,
                 payment_amount_cents=amount_paid if amount_paid > 0 else None,
                 payment_currency=currency,
             )
+            applied = user is not None
+            if not applied:
+                reason = "no matching user for paid subscription"
         else:
             customer_id = _stripe_id(_obj_get(obj, "customer"))
             user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
             if user:
-                sync_user_subscription(db, user)
+                applied = sync_user_subscription(db, user)
+                if not applied:
+                    reason = "sync found no active subscription"
+            else:
+                reason = "invoice has no subscription id and no matching customer"
     elif etype == "customer.subscription.trial_will_end":
-        _apply_subscription(db, obj)
+        user = _apply_subscription(db, obj)
+        applied = user is not None
         customer_id = _stripe_id(_obj_get(obj, "customer"))
         user = db.query(User).filter(User.stripe_customer_id == customer_id).first()
         if user and not user.trial_reminder_sent:
             from app.services.trial_notifications import send_trial_ending_email
-            from app.services.system_email import send_system_email
 
             to, subject, text, html = send_trial_ending_email(user)
             _schedule_system_email(to, subject, text, html)
             user.trial_reminder_sent = True
             db.commit()
+    else:
+        # Events we don't act on are acknowledged as-is.
+        applied = True
 
-    return etype
+    return {"type": etype, "applied": applied, "reason": reason}
