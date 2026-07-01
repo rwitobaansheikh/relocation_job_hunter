@@ -454,7 +454,20 @@ def _apply_subscription(
 def _apply_checkout_session(
     db: Session, session: dict, *, user: User | None = None
 ) -> ApplyResult:
-    """Apply plan changes immediately after Stripe Checkout completes."""
+    """Apply plan changes immediately after Stripe Checkout completes.
+
+    Structured in two phases so that a Stripe API failure in Phase 2 can never
+    prevent the user's plan from being updated:
+
+    Phase 1 (no Stripe API calls, always committed if checkout is complete):
+      - Set stripe_customer_id, stripe_subscription_id
+      - Clear trial_end, set plan_status, set plan from session metadata
+      - db.commit()
+
+    Phase 2 (best-effort, Stripe API calls):
+      - Retrieve full subscription and call _apply_subscription for email +
+        subscription-level metadata sync.
+    """
     metadata = session.get("metadata") or {}
     tier_hint = metadata.get("tier")
     customer_id = _stripe_id(session.get("customer"))
@@ -462,6 +475,19 @@ def _apply_checkout_session(
     details = session.get("customer_details") or {}
     customer_email = session.get("customer_email") or (
         details.get("email") if hasattr(details, "get") else None
+    )
+    payment_status = session.get("payment_status") or ""
+    sub_id = _stripe_id(session.get("subscription"))
+
+    logger.info(
+        "_apply_checkout_session START: session=%s payment_status=%s tier=%s "
+        "user_id=%s customer=%s sub=%s",
+        session.get("id"),
+        payment_status,
+        tier_hint,
+        user_id,
+        customer_id,
+        sub_id,
     )
 
     resolved = user or _resolve_user(
@@ -480,119 +506,145 @@ def _apply_checkout_session(
         return ApplyResult(False, reason)
     user = resolved
 
+    checkout_complete = _checkout_is_complete(session)
+    if not checkout_complete:
+        reason = f"checkout_incomplete (payment_status={payment_status})"
+        logger.info("_apply_checkout_session: %s for user %s", reason, user.id)
+        return ApplyResult(False, reason)
+
+    # ── Phase 1: commit facts derived purely from the session dict ────────────
+    # This must not call _client() so that a Stripe misconfiguration cannot
+    # block a user from seeing their paid plan.
     if customer_id:
         user.stripe_customer_id = customer_id
-
-    sub_id = _stripe_id(session.get("subscription"))
     if sub_id:
         user.stripe_subscription_id = sub_id
+    user.trial_end = None
+    if payment_status == "no_payment_required":
+        user.plan_status = "trialing"
+    elif payment_status == "paid":
+        user.plan_status = "active"
 
-    client = _client()
-    if not tier_hint and session.get("id"):
-        try:
-            line_items = client.checkout.Session.list_line_items(session["id"], limit=1)
-            if line_items.data:
-                tier_hint = _tier_from_line_item(line_items.data[0])
-        except Exception as exc:
-            logger.warning("Could not read checkout line items: %s", exc)
+    # Resolve tier: prefer session metadata, fall back to app default so the
+    # plan column is always a paid value after a completed checkout.
+    resolved_tier = tier_hint if tier_hint in PAID_PLANS else (settings.trial_default_tier or "basic")
+    prev_plan = user.plan
+    user.plan = resolved_tier
 
-    payment_status = session.get("payment_status") or ""
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.error(
+            "_apply_checkout_session Phase 1 commit failed for user %s: %s",
+            user.id,
+            exc,
+        )
+        return ApplyResult(False, f"db_commit_failed: {exc}", user.id)
+
+    logger.info(
+        "_apply_checkout_session Phase 1 committed: plan %s->%s status=%s "
+        "sub=%s for user %s",
+        prev_plan,
+        resolved_tier,
+        user.plan_status,
+        sub_id,
+        user.id,
+    )
+
+    if not sub_id:
+        return ApplyResult(True, "", user.id)
+
+    # ── Phase 2: retrieve full subscription (best-effort, non-blocking) ───────
     amount = session.get("amount_total")
     currency = session.get("currency") or "usd"
     paid_cents = amount if payment_status == "paid" and amount else None
-
-    checkout_complete = _checkout_is_complete(session)
-    applied = False
-    reason = ""
-
-    # Apply tier immediately from checkout metadata so the UI updates even if
-    # the Subscription object is not fully active yet (e.g. status incomplete).
-    if checkout_complete and tier_hint in PAID_PLANS:
-        prev_plan = user.plan
-        user.plan = tier_hint
-        user.trial_end = None
-        if payment_status == "no_payment_required":
-            user.plan_status = "trialing"
-        elif payment_status == "paid":
-            user.plan_status = "active"
-        db.commit()
-        applied = True
-        logger.info(
-            "Applied plan %s->%s from checkout session for user %s (payment_status=%s)",
-            prev_plan,
-            tier_hint,
-            user.id,
-            payment_status,
-        )
-    elif checkout_complete and sub_id and not tier_hint:
-        # Paid checkout but tier metadata missing — still end internal trial.
-        user.trial_end = None
-        user.plan_status = "active" if payment_status == "paid" else "trialing"
-        if user.plan == "trial":
-            user.plan = settings.trial_default_tier or "basic"
-        db.commit()
-        applied = True
-        logger.warning(
-            "Checkout for user %s missing tier metadata; applied default plan %s",
-            user.id,
-            user.plan,
-        )
-    elif not checkout_complete:
-        reason = f"checkout_incomplete (payment_status={payment_status})"
-    elif not tier_hint:
-        reason = "tier_unresolved (no tier metadata and no matching price)"
-
-    if not sub_id:
-        if not applied and not reason:
-            reason = "no_subscription_on_session"
-        return ApplyResult(applied, reason, user.id)
-
     try:
+        client = _client()
+        # Try to get tier from line items if metadata didn't have it.
+        if tier_hint not in PAID_PLANS and session.get("id"):
+            try:
+                line_items = client.checkout.Session.list_line_items(session["id"], limit=1)
+                if line_items.data:
+                    resolved_from_items = _tier_from_line_item(line_items.data[0])
+                    if resolved_from_items:
+                        tier_hint = resolved_from_items
+            except Exception as exc:
+                logger.warning("Could not read checkout line items: %s", exc)
+
+        safe_tier = tier_hint if tier_hint in PAID_PLANS else resolved_tier
         sub = client.Subscription.retrieve(sub_id)
-        # Only use user.plan as a tier_hint fallback if it is already a paid plan;
-        # passing "trial" would cause _apply_subscription to write plan="trial" back.
-        safe_tier_hint = tier_hint if tier_hint in PAID_PLANS else (
-            user.plan if user.plan in PAID_PLANS else None
-        )
         sub_result = _apply_subscription(
             db,
             sub,
-            tier_hint=safe_tier_hint,
+            tier_hint=safe_tier,
             notify=True,
             payment_amount_cents=paid_cents,
             payment_currency=currency,
         )
-        applied = applied or sub_result.applied
-        reason = reason or sub_result.reason
+        logger.info(
+            "_apply_checkout_session Phase 2 sub sync: applied=%s reason=%s",
+            sub_result.applied,
+            sub_result.reason,
+        )
     except Exception as exc:
+        # Phase 1 already committed the plan — this is non-fatal.
         logger.warning(
-            "Subscription retrieve after checkout failed for user %s sub %s: %s",
+            "_apply_checkout_session Phase 2 sub retrieve failed for user %s sub %s: %s",
             user.id,
             sub_id,
             exc,
         )
-        if not applied:
-            reason = reason or f"subscription_retrieve_failed: {exc}"
 
-    return ApplyResult(applied, reason, user.id)
+    return ApplyResult(True, "", user.id)
 
 
 def sync_from_checkout_session(db: Session, user: User, session_id: str) -> bool:
     """Apply subscription state from a completed Checkout session (post-redirect sync)."""
-    if not is_configured() or not session_id:
+    if not is_configured():
+        logger.warning(
+            "sync_from_checkout_session: Stripe not configured, skipping for user %s", user.id
+        )
+        return False
+    if not session_id:
         return False
     try:
         client = _client()
         for attempt in range(5):
             session = client.checkout.Session.retrieve(session_id)
+            logger.info(
+                "sync_from_checkout_session attempt %d: session=%s payment_status=%s "
+                "sub=%s metadata=%s user=%s",
+                attempt,
+                session_id,
+                session.get("payment_status"),
+                session.get("subscription"),
+                session.get("metadata"),
+                user.id,
+            )
             if not _session_belongs_to_user(session, user):
                 logger.warning(
                     "Checkout session %s customer mismatch for user %s; applying for authenticated user",
                     session_id,
                     user.id,
                 )
-            _apply_checkout_session(db, session, user=user)
+            result = _apply_checkout_session(db, session, user=user)
+            logger.info(
+                "sync_from_checkout_session attempt %d result: applied=%s reason=%s",
+                attempt,
+                result.applied,
+                result.reason,
+            )
             db.refresh(user)
+            logger.info(
+                "sync_from_checkout_session after refresh: user=%s plan=%s plan_status=%s "
+                "stripe_sub=%s trial_end=%s",
+                user.id,
+                user.plan,
+                user.plan_status,
+                user.stripe_subscription_id,
+                user.trial_end,
+            )
             # Exit as soon as the plan is upgraded — don't wait for stripe_subscription_id
             # to be populated (it may arrive via webhook after this redirect).
             if current_plan(user) in PAID_PLANS:
@@ -608,11 +660,26 @@ def sync_from_checkout_session(db: Session, user: User, session_id: str) -> bool
 def force_sync_user_from_stripe(db: Session, user: User) -> bool:
     """Aggressively sync subscription from Stripe (all customers matching email)."""
     if not is_configured():
+        logger.warning(
+            "force_sync_user_from_stripe: Stripe not configured, skipping for user %s", user.id
+        )
         return False
     updated = False
     try:
         client = _client()
         customer_ids = _stripe_customer_ids_for_user(user)
+        logger.info(
+            "force_sync_user_from_stripe: user=%s email=%s customer_ids=%s",
+            user.id,
+            user.email,
+            customer_ids,
+        )
+        if not customer_ids:
+            logger.warning(
+                "force_sync_user_from_stripe: no Stripe customers found for user %s (%s)",
+                user.id,
+                user.email,
+            )
         for customer_id in customer_ids:
             user.stripe_customer_id = customer_id
             db.commit()
