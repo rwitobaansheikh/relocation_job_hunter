@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import ConfirmDialog from '../components/ConfirmDialog'
+import useIsMobile from '../useIsMobile'
 
 export default function Admin() {
+  const isMobile = useIsMobile()
   const [users, setUsers] = useState([])
   const [stats, setStats] = useState(null)
   const [feedback, setFeedback] = useState([])
@@ -118,6 +120,53 @@ export default function Admin() {
 
       <div className="card">
         <h3 style={{ marginBottom: '1rem' }}>Users</h3>
+        {isMobile ? (
+          <div className="mobile-row-list">
+            {users.map((u) => (
+              <div key={u.id} className="mobile-row-card">
+                <div className="mobile-row-card__head">
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>{u.profile_name || '-'}</div>
+                    <div className="muted" style={{ fontSize: '0.8rem' }}>{u.email}</div>
+                  </div>
+                  <span className={`badge badge-${u.is_active ? 'applied' : 'rejected'}`}>
+                    {u.is_active ? 'active' : 'disabled'}
+                  </span>
+                </div>
+                <div className="mobile-row-card__meta">
+                  <span style={{ textTransform: 'capitalize' }}>Plan: {u.plan || '-'}</span>
+                  <span>Apps: {u.application_count}</span>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', margin: 0, textTransform: 'none' }}>
+                    <input
+                      type="checkbox"
+                      style={{ width: '1.1rem', height: '1.1rem' }}
+                      checked={!!u.unlimited_access}
+                      onChange={(e) => updateUser(u.id, { unlimited_access: e.target.checked })}
+                    />
+                    Unlimited
+                  </label>
+                </div>
+                <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <select
+                    value={u.role}
+                    style={{ width: 'auto', flex: 1 }}
+                    onChange={(e) => updateUser(u.id, { role: e.target.value })}
+                  >
+                    <option value="user">user</option>
+                    <option value="admin">admin</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm"
+                    onClick={() => updateUser(u.id, { is_active: !u.is_active })}
+                  >
+                    {u.is_active ? 'Disable' : 'Enable'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
         <div style={{ overflowX: 'auto' }}>
           <table className="table">
             <thead>
@@ -175,12 +224,47 @@ export default function Admin() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       <div className="card" style={{ marginTop: '1.5rem' }}>
         <h3 style={{ marginBottom: '1rem' }}>Reviews & contact messages</h3>
         {feedback.length === 0 ? (
           <p className="muted">No reviews or contact messages yet.</p>
+        ) : isMobile ? (
+          <div className="mobile-row-list">
+            {feedback.map((f) => (
+              <div key={f.id} className="mobile-row-card">
+                <div className="mobile-row-card__head">
+                  <span className="badge badge-pending">{f.kind}</span>
+                  {f.rating ? <span style={{ color: 'var(--warning)' }}>{'★'.repeat(f.rating)}</span> : null}
+                </div>
+                <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>
+                  {f.name}
+                  {f.email && <div className="muted" style={{ fontSize: '0.78rem', fontWeight: 400 }}>{f.email}</div>}
+                </div>
+                <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+                  {f.subject && <strong>{f.subject}: </strong>}{f.message}
+                </p>
+                <div className="mobile-row-card__head">
+                  {f.kind === 'review' ? (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', margin: 0, textTransform: 'none', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                      <input
+                        type="checkbox"
+                        style={{ width: '1.1rem', height: '1.1rem' }}
+                        checked={!!f.approved}
+                        onChange={() => toggleApproved(f)}
+                      />
+                      Visible
+                    </label>
+                  ) : <span />}
+                  <button type="button" className="btn-danger btn-sm" onClick={() => removeFeedback(f)}>
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table className="table">

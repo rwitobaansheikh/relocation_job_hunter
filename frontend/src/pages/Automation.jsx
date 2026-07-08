@@ -4,6 +4,7 @@ import { api } from '../api'
 import ConfirmDialog from '../components/ConfirmDialog'
 import HelpButton from '../components/HelpButton'
 import OnboardingGuide from '../components/OnboardingGuide'
+import useIsMobile from '../useIsMobile'
 
 const AUTOMATION_STEPS = [
   {
@@ -144,6 +145,7 @@ function LoopForm({ initial, onCancel, onSave, saving }) {
 }
 
 export default function Automation() {
+  const isMobile = useIsMobile()
   const [loops, setLoops] = useState([])
   const [billing, setBilling] = useState(null)
   const [runs, setRuns] = useState([])
@@ -349,6 +351,25 @@ export default function Automation() {
               ? "No runs yet — your loop's first run happens within 24 hours."
               : 'Add a loop above to start seeing daily activity here.'}
           </p>
+        ) : isMobile ? (
+          <div className="mobile-row-list">
+            {runs.map((r) => (
+              <div key={r.id} className="mobile-row-card">
+                <div className="mobile-row-card__head">
+                  <span style={{ fontSize: '0.85rem', fontWeight: 700 }}>
+                    {new Date(r.started_at).toLocaleString()}
+                  </span>
+                  <span className={`badge badge-${r.status === 'success' ? 'applied' : r.status === 'error' ? 'rejected' : 'pending'}`}>
+                    {r.status}
+                  </span>
+                </div>
+                <div className="muted" style={{ fontSize: '0.82rem' }}>
+                  {r.jobs_found} new jobs · {r.jobs_tailored} tailored
+                </div>
+                {r.detail && <div className="muted" style={{ fontSize: '0.82rem' }}>{r.detail}</div>}
+              </div>
+            ))}
+          </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table className="table">

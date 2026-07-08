@@ -1129,6 +1129,7 @@ label {
   .landing-hero h1 { font-size: 2.2rem; }
   .landing-hero p { font-size: 1.05rem; }
   .landing-nav { flex-wrap: wrap; gap: 0.75rem; }
+  .landing-nav .links { gap: 0.6rem; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .pricing-grid { grid-template-columns: 1fr; }
 
@@ -1209,7 +1210,7 @@ label {
 .landing { max-width: 1100px; margin: 0 auto; padding: 1.5rem 2rem 5rem; }
 .landing-nav { display: flex; justify-content: space-between; align-items: center; padding: 1.5rem 0; }
 .landing-nav .brand { font-size: 1.35rem; font-weight: 800; color: var(--text); letter-spacing: -0.02em; }
-.landing-nav .links { display: flex; gap: 1rem; }
+.landing-nav .links { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 .landing-hero { text-align: center; padding: 4.5rem 0 3.5rem; }
 .landing-hero h1 { font-size: 3.5rem; font-weight: 800; margin-bottom: 1.25rem; line-height: 1.1; color: var(--text); letter-spacing: -0.03em; }
 .landing-hero p { font-size: 1.25rem; color: var(--text-muted); max-width: 700px; margin: 0 auto 2.5rem; }
@@ -2336,4 +2337,139 @@ label {
 
 @media (max-width: 880px) {
   .doc-modal { padding: 1.5rem 1.25rem; }
+}
+
+/* Landing hero: two-column with pipeline live-preview card (per design) */
+.landing-hero {
+  display: flex;
+  align-items: center;
+  gap: clamp(2rem, 5vw, 4rem);
+  flex-wrap: wrap;
+  text-align: left;
+}
+
+.landing-hero__text {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+
+.landing-hero p {
+  margin: 0 0 2.5rem;
+  max-width: 640px;
+}
+
+.landing-cta {
+  justify-content: flex-start;
+}
+
+.pipeline-card {
+  flex: 1 1 320px;
+  min-width: 280px;
+  max-width: 460px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: var(--shadow-lg);
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.pipeline-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pipeline-card__chip {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+}
+
+.pipeline-card__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.pipeline-stat {
+  background: var(--surface-alt);
+  border-radius: 14px;
+  padding: 0.9rem;
+  text-align: center;
+}
+
+.pipeline-stat__value { font-size: 1.5rem; font-weight: 800; }
+.pipeline-stat__label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 0.2rem;
+}
+
+.pipeline-stat--warning { background: var(--warning-soft); }
+.pipeline-stat--warning .pipeline-stat__value,
+.pipeline-stat--warning .pipeline-stat__label { color: var(--warning); }
+.pipeline-stat--success { background: var(--success-soft); }
+.pipeline-stat--success .pipeline-stat__value,
+.pipeline-stat--success .pipeline-stat__label { color: var(--success); }
+
+.pipeline-card__rows {
+  border-top: 1px dashed var(--border);
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.pipeline-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.88rem;
+}
+
+.pipeline-row__match { font-weight: 700; color: var(--accent-text); flex-shrink: 0; }
+
+/* Mobile stacked row cards replacing wide tables (Automation runs, Admin) */
+.mobile-row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.mobile-row-card {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.mobile-row-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mobile-row-card__meta {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  align-items: center;
 }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import useIsMobile from '../useIsMobile'
 import ApplyOnSiteButton from '../components/ApplyOnSiteButton'
 import DidYouApplyModal from '../components/DidYouApplyModal'
 import JobDescription from '../components/JobDescription'
@@ -56,6 +57,7 @@ function hasTailoredDocs(app) {
 
 export default function Applications() {
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
   const { profile } = useProfile()
   const [applications, setApplications] = useState([])
   const [filter, setFilter] = useState('')
@@ -386,22 +388,25 @@ export default function Applications() {
           <option value="match">Highest match first</option>
           <option value="newest">Newest first</option>
         </select>
-        <div className="view-toggle">
-          <button
-            type="button"
-            className={`btn-secondary btn-sm${viewMode === 'table' ? ' active' : ''}`}
-            onClick={() => setViewMode('table')}
-          >
-            Table
-          </button>
-          <button
-            type="button"
-            className={`btn-secondary btn-sm${viewMode === 'cards' ? ' active' : ''}`}
-            onClick={() => setViewMode('cards')}
-          >
-            Cards
-          </button>
-        </div>
+        {/* Tables need horizontal scroll on phones, so mobile always uses cards. */}
+        {!isMobile && (
+          <div className="view-toggle">
+            <button
+              type="button"
+              className={`btn-secondary btn-sm${viewMode === 'table' ? ' active' : ''}`}
+              onClick={() => setViewMode('table')}
+            >
+              Table
+            </button>
+            <button
+              type="button"
+              className={`btn-secondary btn-sm${viewMode === 'cards' ? ' active' : ''}`}
+              onClick={() => setViewMode('cards')}
+            >
+              Cards
+            </button>
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -414,7 +419,7 @@ export default function Applications() {
             Search jobs
           </button>
         </div>
-      ) : viewMode === 'table' ? (
+      ) : viewMode === 'table' && !isMobile ? (
         <div className="applications-table-wrap card">
           <table className="applications-table">
             <thead>

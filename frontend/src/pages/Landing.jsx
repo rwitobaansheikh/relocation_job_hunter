@@ -60,16 +60,49 @@ export default function Landing() {
       </nav>
 
       <header className="landing-hero">
-        <div className="landing-hero__badge">3-day free trial · Search · Tailor · Apply</div>
-        <h1>Find jobs. Tailor your CV. Apply with confidence.</h1>
-        <p>
-          Job Application Flow brings job search and AI document tailoring into one workspace —
-          discover roles, generate tailored CVs and cover letters, and apply on job sites yourself.
-          We help you draft outreach emails, but never send on your behalf.
-        </p>
-        <div className="landing-cta">
-          <button className="btn-primary" onClick={() => navigate('/register')}>Start free trial</button>
-          <button className="btn-secondary" onClick={() => navigate('/login')}>I already have an account</button>
+        <div className="landing-hero__text">
+          <div className="landing-hero__badge">3-day free trial · Search · Tailor · Apply</div>
+          <h1>Find jobs. Tailor your CV. Apply with confidence.</h1>
+          <p>
+            Job Application Flow brings job search and AI document tailoring into one workspace —
+            discover roles, generate tailored CVs and cover letters, and apply on job sites yourself.
+            We help you draft outreach emails, but never send on your behalf.
+          </p>
+          <div className="landing-cta">
+            <button className="btn-primary" onClick={() => navigate('/register')}>Start free trial</button>
+            <button className="btn-secondary" onClick={() => navigate('/login')}>I already have an account</button>
+          </div>
+        </div>
+
+        <div className="pipeline-card" aria-hidden="true">
+          <div className="pipeline-card__head">
+            <span style={{ fontWeight: 800, fontSize: '1rem' }}>Your pipeline</span>
+            <span className="pipeline-card__chip">Live preview</span>
+          </div>
+          <div className="pipeline-card__stats">
+            <div className="pipeline-stat">
+              <div className="pipeline-stat__value">42</div>
+              <div className="pipeline-stat__label">Discovered</div>
+            </div>
+            <div className="pipeline-stat pipeline-stat--warning">
+              <div className="pipeline-stat__value">15</div>
+              <div className="pipeline-stat__label">Tailored</div>
+            </div>
+            <div className="pipeline-stat pipeline-stat--success">
+              <div className="pipeline-stat__value">9</div>
+              <div className="pipeline-stat__label">Applied</div>
+            </div>
+          </div>
+          <div className="pipeline-card__rows">
+            <div className="pipeline-row">
+              <span>Senior Product Designer · Northwind Labs</span>
+              <span className="pipeline-row__match">92%</span>
+            </div>
+            <div className="pipeline-row">
+              <span>UX Researcher · Fjord &amp; Co</span>
+              <span className="pipeline-row__match">87%</span>
+            </div>
+          </div>
         </div>
       </header>
 
