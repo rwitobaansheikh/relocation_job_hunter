@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import ConfirmDialog from '../components/ConfirmDialog'
 
 export default function Admin() {
   const [users, setUsers] = useState([])
@@ -7,6 +8,7 @@ export default function Admin() {
   const [feedback, setFeedback] = useState([])
   const [message, setMessage] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [confirmDialog, setConfirmDialog] = useState(null)
 
   const load = async () => {
     setLoading(true)
@@ -30,14 +32,24 @@ export default function Admin() {
     }
   }
 
-  const removeFeedback = async (item) => {
-    if (!window.confirm('Delete this entry?')) return
-    try {
-      await api.deleteFeedback(item.id)
-      await load()
-    } catch (err) {
-      setMessage({ type: 'error', text: err.message })
-    }
+  const removeFeedback = (item) => {
+    const isReview = item.kind === 'review'
+    setConfirmDialog({
+      title: isReview ? 'Delete this review?' : 'Delete this message?',
+      body: isReview
+        ? 'It will be removed from the public feedback page immediately.'
+        : "This can't be undone.",
+      confirmLabel: isReview ? 'Delete review' : 'Delete message',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await api.deleteFeedback(item.id)
+          await load()
+        } catch (err) {
+          setMessage({ type: 'error', text: err.message })
+        }
+      },
+    })
   }
 
   useEffect(() => {
@@ -168,7 +180,7 @@ export default function Admin() {
       <div className="card" style={{ marginTop: '1.5rem' }}>
         <h3 style={{ marginBottom: '1rem' }}>Reviews & contact messages</h3>
         {feedback.length === 0 ? (
-          <p className="muted">No feedback yet.</p>
+          <p className="muted">No reviews or contact messages yet.</p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table className="table">
@@ -219,6 +231,8 @@ export default function Admin() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog dialog={confirmDialog} onCancel={() => setConfirmDialog(null)} />
     </div>
   )
 }

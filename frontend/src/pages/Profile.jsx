@@ -278,20 +278,23 @@ export default function Profile() {
 
         <div>
           <div className="card" style={{ marginBottom: '1.5rem' }}>
-            <h3 style={{ marginBottom: '1rem' }}>Upload CV</h3>
-            <label className="file-upload">
+            <h3 style={{ marginBottom: '0.3rem' }}>CV</h3>
+            <p className="muted" style={{ marginBottom: '1rem', fontSize: '0.85rem' }}>
+              PDF or DOCX. We suggest roles from it.
+            </p>
+            <label className={`upload-zone${profile?.cv_path ? ' done' : ''}`}>
               <input type="file" accept=".pdf,.docx,.doc,.txt" onChange={(e) => e.target.files[0] && handleFileUpload('cv', e.target.files[0])} />
-              <p>{profile?.cv_path ? '✓ CV uploaded — click to replace' : 'Drop or click to upload CV (PDF, DOCX, TXT)'}</p>
+              {profile?.cv_path ? '✓ CV uploaded — click to replace' : 'Click to upload your CV (PDF or DOCX)'}
             </label>
           </div>
           <div className="card">
-            <h3 style={{ marginBottom: '1rem' }}>Upload Baseline Cover Letter</h3>
-            <p className="muted" style={{ marginBottom: '0.8rem', fontSize: '0.85rem' }}>
-              Required for AI search-criteria suggestions.
+            <h3 style={{ marginBottom: '0.3rem' }}>Baseline cover letter</h3>
+            <p className="muted" style={{ marginBottom: '1rem', fontSize: '0.85rem' }}>
+              Used as a starting point for AI tailoring.
             </p>
-            <label className="file-upload">
+            <label className={`upload-zone${profile?.baseline_cover_letter_path ? ' done' : ''}`}>
               <input type="file" accept=".pdf,.docx,.doc,.txt" onChange={(e) => e.target.files[0] && handleFileUpload('cover', e.target.files[0])} />
-              <p>{profile?.baseline_cover_letter_path ? '✓ Cover letter uploaded — click to replace' : 'Drop or click to upload cover letter'}</p>
+              {profile?.baseline_cover_letter_path ? '✓ Cover letter uploaded — click to replace' : 'Click to upload a baseline cover letter'}
             </label>
           </div>
         </div>

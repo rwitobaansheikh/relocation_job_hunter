@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import ApplyOnSiteButton from '../components/ApplyOnSiteButton'
 import DidYouApplyModal from '../components/DidYouApplyModal'
@@ -54,6 +55,7 @@ function hasTailoredDocs(app) {
 }
 
 export default function Applications() {
+  const navigate = useNavigate()
   const { profile } = useProfile()
   const [applications, setApplications] = useState([])
   const [filter, setFilter] = useState('')
@@ -403,9 +405,12 @@ export default function Applications() {
       {loading ? (
         <p>Loading...</p>
       ) : applications.length === 0 ? (
-        <div className="empty-state">
-          <p>No applications yet.</p>
-          <p className="muted">Search for jobs and they will appear here automatically.</p>
+        <div className="empty-dashed">
+          <p className="title">No applications yet</p>
+          <p>Run a job search and matches will land here automatically.</p>
+          <button type="button" className="btn-primary" onClick={() => navigate('/app/jobs')}>
+            Search jobs
+          </button>
         </div>
       ) : viewMode === 'table' ? (
         <div className="applications-table-wrap card">

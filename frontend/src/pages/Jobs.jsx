@@ -240,10 +240,18 @@ export default function Jobs() {
 
   return (
     <div>
-      <h2 className="page-title">Search Jobs</h2>
+      <h2 className="page-title">Search jobs</h2>
       <p className="page-subtitle">
-        Set your filters and search for matching roles — results save to Applications automatically.
+        Set your filters and search — matches save to Applications automatically.
       </p>
+
+      <div className="tip-banner">
+        <span aria-hidden="true" style={{ fontSize: '1.2rem' }}>💡</span>
+        <p>
+          Tip: run one broad search first to see match quality, then narrow with seniority and
+          salary filters. Results are ranked by fit with your CV.
+        </p>
+      </div>
 
       <div className="card" style={{ marginBottom: '2rem' }}>
         <h3 style={{ marginBottom: '0.5rem' }}>Add a job by link</h3>
@@ -494,22 +502,32 @@ export default function Jobs() {
           className="btn-primary"
           onClick={handleSearch}
           disabled={searching}
-          title="Start Job Search"
+          title="Start job search"
           help="Runs a search across LinkedIn and other boards. Progress stays visible if you switch pages — you can stop it anytime."
         >
-          {searching ? 'Searching…' : 'Start Job Search'}
+          {searching && <span aria-hidden="true" className="spinner" />}
+          {searching ? 'Searching…' : 'Start job search'}
         </HelpButton>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      {results && !searching && (
+      {results && !searching && results.jobs_found > 0 && (
         <div className="card">
-          <p style={{ fontSize: '1.05rem', marginBottom: '0.6rem' }}>
+          <p style={{ fontSize: '1.02rem', margin: 0 }}>
             Found <strong>{results.jobs_found}</strong> matching {results.jobs_found === 1 ? 'job' : 'jobs'}.
             {' '}
             <strong>{results.jobs_stored}</strong> {results.jobs_stored === 1 ? 'was' : 'were'} saved to{' '}
             <a href="/app/applications">Applications</a>.
+          </p>
+        </div>
+      )}
+
+      {results && !searching && results.jobs_found === 0 && (
+        <div className="empty-dashed" style={{ padding: '2rem 1.6rem' }}>
+          <p className="title">No jobs matched your filters</p>
+          <p>
+            Try lowering the minimum salary or widening the seniority levels, then search again.
           </p>
         </div>
       )}

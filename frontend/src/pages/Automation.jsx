@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api'
+import ConfirmDialog from '../components/ConfirmDialog'
 import HelpButton from '../components/HelpButton'
 import OnboardingGuide from '../components/OnboardingGuide'
 
@@ -150,6 +151,7 @@ export default function Automation() {
   const [message, setMessage] = useState(null)
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState(null)
+  const [confirmDialog, setConfirmDialog] = useState(null)
 
   const load = async () => {
     setLoading(true)
@@ -211,14 +213,21 @@ export default function Automation() {
     }
   }
 
-  const remove = async (loop) => {
-    if (!window.confirm(`Delete loop "${loop.name || loop.role}"?`)) return
-    try {
-      await api.deleteLoop(loop.id)
-      await load()
-    } catch (err) {
-      setMessage({ type: 'error', text: err.message })
-    }
+  const remove = (loop) => {
+    setConfirmDialog({
+      title: 'Delete this loop?',
+      body: `"${loop.name || loop.role || 'This loop'}" will stop running immediately. This can't be undone.`,
+      confirmLabel: 'Delete loop',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await api.deleteLoop(loop.id)
+          await load()
+        } catch (err) {
+          setMessage({ type: 'error', text: err.message })
+        }
+      },
+    })
   }
 
   if (loading) return <p>Loading...</p>
@@ -277,7 +286,9 @@ export default function Automation() {
       )}
 
       {loops.length === 0 && editing !== 'new' ? (
-        <div className="empty-state"><p>No automation loops yet.</p></div>
+        <div className="empty-dashed" style={{ padding: '2.5rem 2rem' }}>
+          <p style={{ margin: 0 }}>No automation loops yet.</p>
+        </div>
       ) : (
         <div className="application-list">
           {loops.map((loop) => (
@@ -333,7 +344,11 @@ export default function Automation() {
       <div className="card" style={{ marginTop: '1.5rem' }}>
         <h3 style={{ marginBottom: '1rem' }}>Recent automation activity</h3>
         {runs.length === 0 ? (
-          <p className="muted">No automation runs yet.</p>
+          <p className="muted">
+            {loops.length > 0
+              ? "No runs yet — your loop's first run happens within 24 hours."
+              : 'Add a loop above to start seeing daily activity here.'}
+          </p>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table className="table">
@@ -365,6 +380,8 @@ export default function Automation() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog dialog={confirmDialog} onCancel={() => setConfirmDialog(null)} />
     </div>
   )
 }

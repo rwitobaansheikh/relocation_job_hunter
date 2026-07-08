@@ -1,33 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import OnboardingGuide from '../components/OnboardingGuide'
 import { useProfile } from '../ProfileContext'
 import HelpButton from '../components/HelpButton'
-
-const DASHBOARD_STEPS = [
-  {
-    step: 1,
-    title: 'Set up your profile',
-    body: 'Upload your CV and cover letter, then add target roles and countries.',
-    to: '/app/profile',
-    linkLabel: 'Open Profile →',
-  },
-  {
-    step: 2,
-    title: 'Search for one location',
-    body: 'Run a job search for a single country or city. Results save to Applications.',
-    to: '/app/jobs',
-    linkLabel: 'Search jobs →',
-  },
-  {
-    step: 3,
-    title: 'Tailor & apply',
-    body: 'Tailor documents for each role, then apply on the job site with your downloads.',
-    to: '/app/applications',
-    linkLabel: 'Go to Applications →',
-  },
-]
 
 export default function Dashboard() {
   const { profile, loading } = useProfile()
@@ -61,97 +36,122 @@ export default function Dashboard() {
     )
   }
 
+  const step1Done = Boolean(profile.cv_path && profile.baseline_cover_letter_path)
+  const step2Done = (stats?.total ?? 0) > 0
+  const step3Done = ((stats?.tailored ?? 0) + (stats?.applied ?? 0) + (stats?.interview ?? 0)) > 0
+  const doneCount = [step1Done, step2Done, step3Done].filter(Boolean).length
+
+  const checklistSteps = [
+    {
+      done: step1Done,
+      title: 'Set up your profile',
+      body: 'Upload your CV and cover letter, then add target roles.',
+      to: '/app/profile',
+      linkLabel: 'Open Profile →',
+    },
+    {
+      done: step2Done,
+      title: 'Search for jobs',
+      body: 'Run a search — results save to Applications.',
+      to: '/app/jobs',
+      linkLabel: 'Search jobs →',
+    },
+    {
+      done: step3Done,
+      title: 'Tailor & apply',
+      body: 'Tailor documents, then apply on the job site.',
+      to: '/app/applications',
+      linkLabel: 'Go to Applications →',
+    },
+  ]
+
   return (
     <div>
       <h2 className="page-title">Dashboard</h2>
-      <p className="page-subtitle">Track your job hunt for {profile.full_name}</p>
+      <p className="page-subtitle">Track your job hunt for {profile.full_name}.</p>
 
-      {(stats?.total === 0 || !stats) && (
-        <OnboardingGuide
-          storageKey="jh_onboarding_dashboard"
-          title="Welcome — here’s how to land your first application"
-          steps={DASHBOARD_STEPS}
-        />
-      )}
-
-      {stats && (
-        <div className="stats-grid">
-          <div className="stat-card"><div className="value">{stats.total}</div><div className="label">Total Jobs</div></div>
-          <div className="stat-card"><div className="value">{stats.discovered}</div><div className="label">Discovered</div></div>
-          <div className="stat-card"><div className="value">{stats.tailored}</div><div className="label">Tailored</div></div>
-          <div className="stat-card"><div className="value">{stats.applied}</div><div className="label">Applied</div></div>
-          <div className="stat-card"><div className="value">{stats.interview}</div><div className="label">Interviews</div></div>
-          <div className="stat-card"><div className="value">{stats.needs_follow_up}</div><div className="label">Need Follow-up</div></div>
-        </div>
-      )}
-
-      <div className="grid-2">
-        <div className="card">
-          <h3 style={{ marginBottom: '0.8rem' }}>Quick Actions</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <HelpButton
-              className="btn-primary"
-              style={{ width: '100%' }}
-              onClick={() => navigate('/app/jobs')}
-              title="Search New Jobs"
-              help="Open the job search page to find up to 100 matching roles from multiple boards, filtered by your CV and preferences."
-            >
-              Search New Jobs
-            </HelpButton>
-            <HelpButton
-              className="btn-secondary"
-              style={{ width: '100%' }}
-              onClick={() => navigate('/app/applications')}
-              title="View Applications"
-              help="See every job you've saved, tailor documents, and apply on each job site."
-            >
-              View Applications
-            </HelpButton>
-            <HelpButton
-              className="btn-secondary"
-              style={{ width: '100%' }}
-              onClick={() => navigate('/app/profile')}
-              title="Update Profile"
-              help="Edit your name, skills, target roles, countries, and re-upload your CV or cover letter."
-            >
-              Update Profile
-            </HelpButton>
+      <div className="checklist-card">
+        <div className="checklist-card__head">
+          <div>
+            <div className="checklist-card__eyebrow">Getting started</div>
+            <h3 style={{ margin: 0, fontSize: '1.2rem' }}>Here's how to land your first application</h3>
           </div>
+          <span className="checklist-card__count">{doneCount} / 3 done</span>
         </div>
-        <div className="card">
-          <h3 style={{ marginBottom: '0.8rem' }}>Profile Status</h3>
-          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-            CV: {profile.cv_path ? '✓ Uploaded' : '✗ Not uploaded'}<br />
-            Cover Letter: {profile.baseline_cover_letter_path ? '✓ Uploaded' : '✗ Not uploaded'}<br />
-            Target Roles: {profile.target_roles || 'Not set'}<br />
-            Target Countries: {profile.target_countries || 'Not set'}
-          </p>
+        <div className="checklist-progress">
+          <div style={{ width: `${(doneCount / 3) * 100}%` }} />
+        </div>
+        <div className="checklist-steps">
+          {checklistSteps.map((step) => (
+            <div key={step.title} className="checklist-step">
+              <span className={`checklist-step__badge${step.done ? ' done' : ''}`}>
+                {step.done ? '✓' : ''}
+              </span>
+              <div>
+                <strong style={{ fontSize: '0.95rem' }}>{step.title}</strong>
+                <p>{step.body}</p>
+                <button type="button" className="link-btn" style={{ fontSize: '0.85rem' }} onClick={() => navigate(step.to)}>
+                  {step.linkLabel}
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
-      {billing && (
+      {stats && (
+        <div className="stats-grid">
+          <div className="stat-card"><div className="value">{stats.total}</div><div className="label">Total jobs</div></div>
+          <div className="stat-card"><div className="value">{stats.discovered}</div><div className="label">Discovered</div></div>
+          <div className="stat-card stat-card--warning"><div className="value">{stats.tailored}</div><div className="label">Tailored</div></div>
+          <div className="stat-card stat-card--success"><div className="value">{stats.applied}</div><div className="label">Applied</div></div>
+        </div>
+      )}
+
+      <div className="quick-grid">
+        <button type="button" className="quick-card" onClick={() => navigate('/app/jobs')}>
+          <span aria-hidden="true" className="glyph">⌕</span>
+          <strong>Search new jobs</strong>
+          <span>Find up to 100 matching roles from multiple boards.</span>
+        </button>
+        <button type="button" className="quick-card" onClick={() => navigate('/app/applications')}>
+          <span aria-hidden="true" className="glyph">▤</span>
+          <strong>View applications</strong>
+          <span>Tailor documents and apply on each job site.</span>
+        </button>
+        <button type="button" className="quick-card" onClick={() => navigate('/app/profile')}>
+          <span aria-hidden="true" className="glyph">☷</span>
+          <strong>Update profile</strong>
+          <span>Edit target roles, countries, CV, and cover letter.</span>
+        </button>
+      </div>
+
+      <button
+        type="button"
+        className="link-btn"
+        style={{ marginTop: '1.75rem' }}
+        onClick={() => window.dispatchEvent(new CustomEvent('tour:start'))}
+      >
+        Replay the guided tour
+      </button>
+
+      {billing && billing.stripe_configured && !billing.has_stripe_subscription && billing.plan !== 'unlimited' && (
         <div className="card" style={{ marginTop: '1.5rem' }}>
-          <h3 style={{ marginBottom: '0.8rem' }}>Plan & usage</h3>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.6rem' }}>
-            <span className="badge badge-applied" style={{ textTransform: 'capitalize' }}>{billing.plan}</span>
-            {billing.plan === 'trial' && <span className="muted">{billing.trial_days_left} day(s) of trial left</span>}
-            <Link to="/app/billing" style={{ fontSize: '0.85rem' }}>Plan & Billing →</Link>
-          </div>
-          {billing.stripe_configured && !billing.has_stripe_subscription && billing.plan !== 'unlimited' && (
-            <div style={{ marginBottom: '0.75rem' }}>
-              <HelpButton
-                className="btn-primary btn-sm"
-                onClick={() => navigate('/app/billing')}
-                title="Start free trial"
-                help="Add your card for a 3-day free trial on Basic. You are only charged when the trial ends."
-              >
-                Start 3-day free trial
-              </HelpButton>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.8rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <span className="badge badge-applied" style={{ textTransform: 'capitalize' }}>{billing.plan}</span>
+              {billing.plan === 'trial' && <span className="muted">{billing.trial_days_left} day(s) of trial left</span>}
+              <Link to="/app/billing" style={{ fontSize: '0.85rem' }}>Plan & Billing →</Link>
             </div>
-          )}
-          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-            {billing.usage.manual_today} / {billing.limits.manual_per_day} applications tailored today
-          </p>
+            <HelpButton
+              className="btn-primary btn-sm"
+              onClick={() => navigate('/app/billing')}
+              title="Start free trial"
+              help="Add your card for a 3-day free trial on Basic. You are only charged when the trial ends."
+            >
+              Start 3-day free trial
+            </HelpButton>
+          </div>
         </div>
       )}
     </div>
