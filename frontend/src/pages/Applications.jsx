@@ -289,6 +289,8 @@ export default function Applications() {
       <TailoredDocuments
         applicationId={app.id}
         jobUrl={app.job?.url}
+        jobTitle={app.job?.title}
+        company={app.job?.company}
         open={expandedDocs === app.id}
         onClose={() => setExpandedDocs(null)}
         onApply={() => handleManualApply(app)}
