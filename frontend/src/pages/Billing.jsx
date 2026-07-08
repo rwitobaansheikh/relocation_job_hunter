@@ -74,6 +74,7 @@ export default function Billing() {
   }, [])
 
   const subscribe = async (tier) => {
+    if (busy) return
     setBusy(tier)
     setMessage(null)
     try {
@@ -86,6 +87,7 @@ export default function Billing() {
   }
 
   const startTrial = async () => {
+    if (busy) return
     setBusy('trial')
     setMessage(null)
     try {
@@ -164,7 +166,7 @@ export default function Billing() {
           <HelpButton
             className="btn-primary"
             onClick={startTrial}
-            disabled={busy === 'trial'}
+            disabled={!!busy}
             title="Start free trial"
             help={`Unlock Basic plan features for ${trialDays} days. Stripe collects your payment method and charges automatically when the trial ends.`}
           >
@@ -208,7 +210,7 @@ export default function Billing() {
             <HelpButton
               className="btn-secondary"
               onClick={manage}
-              disabled={busy === 'portal'}
+              disabled={!!busy}
               title="Manage subscription"
               help="Opens the Stripe customer portal where you can update payment method, change plan, or cancel."
             >
@@ -221,7 +223,7 @@ export default function Billing() {
             <HelpButton
               className="btn-secondary"
               onClick={syncPlan}
-              disabled={busy === 'sync'}
+              disabled={!!busy}
               title="Sync my plan"
               help="Pull your latest subscription from Stripe if you already paid but still see Trial."
             >
@@ -256,7 +258,7 @@ export default function Billing() {
               <HelpButton
                 className={isCurrent ? 'btn-secondary' : 'btn-primary'}
                 style={{ width: '100%' }}
-                disabled={busy === t.id || isCurrent || !data.stripe_configured}
+                disabled={!!busy || isCurrent || !data.stripe_configured}
                 onClick={() => subscribe(t.id)}
                 title={isCurrent ? 'Current plan' : `Choose ${t.name}`}
                 help={isCurrent

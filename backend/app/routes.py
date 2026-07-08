@@ -181,7 +181,12 @@ def delete_my_account(
 ):
     """GDPR right-to-erasure: cancel any subscription and permanently delete the
     account and all associated personal data. Irreversible."""
-    if not verify_password(data.password, user.password_hash):
+    if user.oauth_provider:
+        # OAuth accounts have a random unusable password; the typed DELETE
+        # confirmation is the deletion guard instead.
+        if (data.confirm or "").strip().upper() != "DELETE":
+            raise HTTPException(status_code=400, detail="Type DELETE to confirm")
+    elif not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=403, detail="Password is incorrect")
     delete_account(db, user)
     return None
@@ -279,7 +284,22 @@ async def upload_cv(
         await f.write(await file.read())
 
     profile.cv_path = str(dest)
-    profile.cv_text = extract_text_from_file(str(dest))
+    extracted = extract_text_from_file(str(dest))
+    if extracted.strip():
+        profile.cv_text = extracted
+        # Job match scores are driven by the CV: auto-derive skills from it so
+        # the skills component isn't zero for users who never typed them.
+        if not (profile.skills or "").strip():
+            profile.skills = ", ".join(JobMatcher.extract_skills_from_cv(extracted))
+    elif not (profile.cv_text or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "We couldn't read any text from this CV (it may be a scanned image). "
+                "Job match scoring needs a text-based PDF or DOCX — please export "
+                "your CV as a text PDF and upload again."
+            ),
+        )
     profile.cv_links_json = serialize_project_links(
         build_project_link_map(str(dest), profile.cv_text)
     )
@@ -601,17 +621,13 @@ def list_applications(
             (JobApplication.automation_batch_date == "")
             | (JobApplication.automation_batch_date.is_(None))
         )
-    if sort == "match":
-        return query.order_by(
-            JobApplication.ai_match_score.desc(),
-            JobApplication.created_at.desc(),
-        ).all()
-    if automation_batch:
-        return query.order_by(
-            JobApplication.ai_match_score.desc(),
-            JobApplication.created_at.desc(),
-        ).all()
-    return query.order_by(JobApplication.created_at.desc()).all()
+    if sort == "newest":
+        return query.order_by(JobApplication.created_at.desc()).all()
+    # Default: best matches first (created_at as tiebreak).
+    return query.order_by(
+        JobApplication.ai_match_score.desc(),
+        JobApplication.created_at.desc(),
+    ).all()
 
 
 @router.get("/applications/automation-batches")

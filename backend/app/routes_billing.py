@@ -140,6 +140,11 @@ def checkout(
 ):
     if data.tier not in {t["id"] for t in TIERS}:
         raise HTTPException(status_code=400, detail="Unknown plan")
+    if user.stripe_subscription_id and user.plan_status in ("active", "trialing"):
+        raise HTTPException(
+            status_code=400,
+            detail="You already have an active subscription — use Manage billing to change plans",
+        )
     try:
         url = billing.create_checkout_session(db, user, data.tier)
     except billing.BillingError as exc:

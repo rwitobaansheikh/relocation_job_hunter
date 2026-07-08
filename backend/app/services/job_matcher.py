@@ -1,6 +1,7 @@
 """Match and score jobs against user CV and filters."""
 
 import re
+from datetime import datetime, timedelta
 from typing import Optional
 
 from app.database import UserProfile
@@ -77,16 +78,18 @@ class JobMatcher:
         title = job.title.lower()
         text = " ".join([job.title, job.description, " ".join(job.tags)]).lower()
 
+        # Word-boundary matching: substring checks misfired on "leadership",
+        # "staffing", "misleading", etc. and rejected good early-career roles.
         senior_signals = [
-            "senior", "sr.", "lead", "principal", "staff", "head of", "manager",
-            "director", "vp ", "3+ years", "4+ years", "5+ years", "6+ years",
+            "senior", "sr", "lead", "principal", "staff", "head of", "manager",
+            "director", "vp", "5+ years", "6+ years",
             "7+ years", "8+ years", "10+ years",
         ]
-        if any(s in title for s in senior_signals) or any(s in text for s in senior_signals):
+        if _has_word(senior_signals, title) or _has_word(senior_signals, text):
             return ""
 
         for kw in JUNIOR_KEYWORDS:
-            if kw in text:
+            if _has_word([kw], text):
                 if "intern" in kw:
                     return "intern"
                 if "grad" in kw:
@@ -188,7 +191,7 @@ class JobMatcher:
             return True
 
         # Remote-only job boards
-        if source in ("remoteok", "remotive", "weworkremotely"):
+        if source in ("remoteok", "remotive", "weworkremotely", "jobicy"):
             return "remote" in work_types
 
         # Look for text clues in title, description, and location
@@ -251,12 +254,15 @@ class JobMatcher:
                 if alias in text:
                     return True
 
-        # Check worldwide remote signals ONLY if the user didn't explicitly restrict to a non-remote physical country,
-        # OR if the job explicitly says "anywhere" / "worldwide"
+        # Worldwide/open-remote signals only satisfy the filter when the user's
+        # location list itself is remote-friendly; an explicit physical-country
+        # restriction (e.g. "Germany") must not be bypassed by "worldwide" jobs.
+        remote_tokens = {"remote", "worldwide", "anywhere", "global"}
+        allow_worldwide = any(c in remote_tokens for c in countries)
         worldwide_signals = ["worldwide", "anywhere", "global", "no location restriction", "remote (global)"]
-        if any(signal in text for signal in worldwide_signals):
+        if allow_worldwide and any(signal in text for signal in worldwide_signals):
             return True
-            
+
         # If they explicitly search for "remote", allow jobs with "remote" in them
         if "remote" in countries and "remote" in text:
             return True
@@ -275,7 +281,7 @@ class JobMatcher:
         return {t for t in tokens if t not in stop and not t.isdigit()}
 
     def _cv_description_overlap(self, job: RawJob, profile: UserProfile) -> float:
-        """0–40 points from CV vs job-description term overlap."""
+        """0–35 points from CV vs job-description term overlap."""
         cv_tokens = self._cv_tokens(profile.cv_text or "")
         if not cv_tokens:
             return 0.0
@@ -285,7 +291,7 @@ class JobMatcher:
             return 0.0
         overlap = len(cv_tokens & desc_tokens)
         ratio = overlap / max(len(cv_tokens), 1)
-        return min(40.0, ratio * 80 + overlap * 0.5)
+        return min(35.0, ratio * 60 + overlap * 0.4)
 
     def is_excluded(self, job: RawJob, requested_locations: Optional[list[str]] = None) -> tuple[bool, str]:
         """Hard exclusions applied before other filters: drop blacklisted companies.
@@ -316,36 +322,40 @@ class JobMatcher:
         return bool(re.search(r"(^|[\s,(/-])us([\s,)/.-]|$)", text))
 
     def score_relevance(self, job: RawJob, profile: UserProfile) -> float:
+        """0–100 relevance score. Weights are budgeted so strong matches land
+        around 70–90 instead of everything saturating at the 100 ceiling —
+        otherwise ranking loses granularity exactly where it matters most."""
         score = 0.0
         text = " ".join([job.title, job.description, " ".join(job.tags)]).lower()
-        cv_text = (profile.cv_text or "").lower()
 
-        # Primary ranking signal: CV vs full job description overlap.
+        # Primary ranking signal: CV vs full job description overlap (0–35).
         score += self._cv_description_overlap(job, profile)
 
+        # Best single role match only — stacking every target role inflated
+        # scores for generic postings that name-drop many titles (0–20).
         target_roles = [r.strip().lower() for r in (profile.target_roles or "").split(",") if r.strip()]
+        role_points = 0
         for role in target_roles:
             if role in job.title.lower():
-                score += 20
+                role_points = max(role_points, 20)
             elif role in text:
-                score += 10
+                role_points = max(role_points, 10)
+        score += role_points
 
+        # Target country named in the posting (first match only, +8).
         target_countries = [c.strip().lower() for c in (profile.target_countries or "").split(",") if c.strip()]
-        for country in target_countries:
-            if country in text or country in job.location.lower():
-                score += 10
+        if any(c in text or c in job.location.lower() for c in target_countries):
+            score += 8
 
+        # Skills present in the job text, capped at 15. (A previous +2 per
+        # skill-in-CV term was job-independent inflation and was removed.)
         skills = [s.strip().lower() for s in (profile.skills or "").split(",") if s.strip()]
-        for skill in skills:
-            if skill in text:
-                score += 4
-            if skill in cv_text:
-                score += 2
+        score += min(15.0, sum(4 for skill in skills if skill in text))
 
         if job.source == "relocateme":
-            score += 10
-        if job.source == "linkedin":
-            score += 5
+            score += 6
+        elif job.source == "linkedin":
+            score += 3
 
         relocation_kw = self.check_relocation(job)[1]
         if relocation_kw:
@@ -356,6 +366,15 @@ class JobMatcher:
             score += 5
         elif exp == "intern":
             score += 3
+
+        # Freshness: dated-recent jobs outrank undated ones (see posted_at
+        # policy in job_search._process_scraped_job).
+        if job.posted_at:
+            age = datetime.utcnow() - job.posted_at
+            if age <= timedelta(hours=24):
+                score += 8
+            elif age <= timedelta(hours=72):
+                score += 4
 
         return round(min(score, 100.0), 2)
 

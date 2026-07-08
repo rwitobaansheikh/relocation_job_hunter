@@ -197,15 +197,17 @@ export default function Settings() {
         ) : (
           <div>
             {deleteError && <div className="alert alert-error">{deleteError}</div>}
-            <div className="form-group">
-              <label>Confirm your password</label>
-              <input
-                type="password"
-                value={deletePassword}
-                onChange={(e) => setDeletePassword(e.target.value)}
-                placeholder="your password"
-              />
-            </div>
+            {!user?.oauth_provider && (
+              <div className="form-group">
+                <label>Confirm your password</label>
+                <input
+                  type="password"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  placeholder="your password"
+                />
+              </div>
+            )}
             <div className="form-group">
               <label>Type DELETE to confirm</label>
               <input
@@ -217,7 +219,7 @@ export default function Settings() {
             <div style={{ display: 'flex', gap: '0.6rem' }}>
               <button
                 className="btn-danger"
-                disabled={deleting || deleteConfirm !== 'DELETE' || !deletePassword}
+                disabled={deleting || deleteConfirm !== 'DELETE' || (!user?.oauth_provider && !deletePassword)}
                 onClick={deleteAccount}
               >
                 {deleting ? 'Deleting…' : 'Permanently delete'}

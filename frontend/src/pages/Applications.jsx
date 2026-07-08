@@ -57,7 +57,7 @@ export default function Applications() {
   const { profile } = useProfile()
   const [applications, setApplications] = useState([])
   const [filter, setFilter] = useState('')
-  const [sortBy, setSortBy] = useState('')
+  const [sortBy, setSortBy] = useState('match')
   const [queueFilter, setQueueFilter] = useState('')
   const [automationBatches, setAutomationBatches] = useState([])
   const [loading, setLoading] = useState(true)
@@ -379,8 +379,8 @@ export default function Applications() {
           ))}
         </select>
         <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="status-filter" aria-label="Sort applications">
-          <option value="">Newest first</option>
           <option value="match">Highest match first</option>
+          <option value="newest">Newest first</option>
         </select>
         <div className="view-toggle">
           <button

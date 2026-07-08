@@ -96,11 +96,35 @@ def price_for_tier(tier: str) -> str:
 def _ensure_customer(db: Session, user: User) -> str:
     if user.stripe_customer_id:
         return user.stripe_customer_id
+    # Reuse an existing Stripe customer for this email before creating another,
+    # so a user can't accumulate multiple customers (and multiple subscriptions).
+    existing = _stripe_customer_ids_for_user(user)
+    if existing:
+        user.stripe_customer_id = existing[0]
+        db.commit()
+        return existing[0]
     client = _client()
-    customer = client.Customer.create(email=user.email, metadata={"user_id": str(user.id)})
+    customer = client.Customer.create(
+        email=user.email,
+        metadata={"user_id": str(user.id)},
+        idempotency_key=f"customer:{user.id}",
+    )
     user.stripe_customer_id = customer["id"]
     db.commit()
     return customer["id"]
+
+
+def _has_live_subscription(customer_id: str) -> bool:
+    """True if the Stripe customer already has an active or trialing subscription."""
+    try:
+        client = _client()
+        for status in ("active", "trialing"):
+            subs = client.Subscription.list(customer=customer_id, status=status, limit=1)
+            if subs.data:
+                return True
+    except Exception as exc:  # Stripe hiccups must not block checkout
+        logger.warning("Subscription check failed for customer %s: %s", customer_id, exc)
+    return False
 
 
 def create_checkout_session(
@@ -109,6 +133,10 @@ def create_checkout_session(
     client = _client()
     price = price_for_tier(tier)
     customer_id = _ensure_customer(db, user)
+    if _has_live_subscription(customer_id):
+        raise BillingError(
+            "You already have an active subscription — use Manage billing to change plans"
+        )
     base = settings.app_base_url.rstrip("/")
 
     subscription_data: dict = {"metadata": {"user_id": str(user.id), "tier": tier}}
@@ -126,6 +154,11 @@ def create_checkout_session(
         metadata={"user_id": str(user.id), "tier": tier, "trial": str(with_trial).lower()},
         subscription_data=subscription_data,
         client_reference_id=str(user.id),
+        # Dedupe rapid retries (double-clicks, network replays) within a 5-minute
+        # window: Stripe returns the same session instead of creating a new one.
+        idempotency_key=(
+            f"checkout:{user.id}:{tier}:{'trial' if with_trial else 'pay'}:{int(time.time() // 300)}"
+        ),
     )
     return session["url"]
 
@@ -346,6 +379,21 @@ def _maybe_send_subscription_email(
     if not should_send_subscription_email(user, tier, email_key):
         return
 
+    # Claim the dedupe key with a conditional UPDATE so two concurrent callers
+    # (post-redirect sync + webhook) can't both pass the check-then-set race.
+    if hasattr(user, "subscription_email_key"):
+        claimed = (
+            db.query(User)
+            .filter(User.id == user.id, User.subscription_email_key != email_key)
+            .update({"subscription_email_key": email_key}, synchronize_session=False)
+        )
+        db.commit()
+        if not claimed:
+            return
+        user.subscription_email_key = email_key
+    else:
+        db.commit()
+
     to, subject, text, html = send_subscription_confirmation_email(
         user,
         tier,
@@ -353,9 +401,6 @@ def _maybe_send_subscription_email(
         payment_currency=payment_currency,
         trialing=status == "trialing" and not paid,
     )
-    if hasattr(user, "subscription_email_key"):
-        user.subscription_email_key = email_key
-    db.commit()
     _schedule_system_email(to, subject, text, html)
     logger.info("Subscription confirmation email queued for user %s tier=%s", user.id, tier)
 
@@ -423,11 +468,19 @@ def _apply_subscription(
     elif status in ("canceled", "unpaid", "incomplete_expired"):
         user.plan = "expired"
     elif status in ("active", "trialing") and not tier:
-        logger.warning(
-            "Stripe subscription %s for user %s has status %s but tier could not be resolved",
+        # The user paid but we can't tell for which tier. Provision the lowest
+        # paid tier rather than leaving them on trial/free; ops can correct the
+        # tier manually from the ERROR log.
+        if user.plan not in PAID_PLANS:
+            user.plan = "basic"
+        user.trial_end = None
+        logger.error(
+            "Stripe subscription %s for user %s is %s but tier could not be resolved; "
+            "provisioned fallback plan %s",
             subscription_id,
             user.id,
             status,
+            user.plan,
         )
 
     db.commit()
@@ -584,20 +637,17 @@ def sync_from_checkout_session(db: Session, user: User, session_id: str) -> bool
         return False
     try:
         client = _client()
-        for attempt in range(5):
-            session = client.checkout.Session.retrieve(session_id)
-            if not _session_belongs_to_user(session, user):
-                logger.warning(
-                    "Checkout session %s customer mismatch for user %s; applying for authenticated user",
-                    session_id,
-                    user.id,
-                )
-            _apply_checkout_session(db, session, user=user)
-            db.refresh(user)
-            if current_plan(user) in PAID_PLANS:
-                return True
-            if attempt < 4:
-                time.sleep(1.0)
+        session = client.checkout.Session.retrieve(session_id)
+        if not _session_belongs_to_user(session, user):
+            logger.warning(
+                "Checkout session %s customer mismatch for user %s; applying for authenticated user",
+                session_id,
+                user.id,
+            )
+        # Single pass — no blocking retries in the request path. Webhooks and
+        # POST /api/billing/sync cover eventual consistency.
+        _apply_checkout_session(db, session, user=user)
+        db.refresh(user)
         return current_plan(user) in PAID_PLANS
     except Exception as exc:
         logger.warning("Checkout session sync failed for user %s: %s", user.id, exc)

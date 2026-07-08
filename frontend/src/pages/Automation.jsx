@@ -41,7 +41,7 @@ const emptyLoop = () => ({
   role: '',
   locations: '',
   seniority_levels: '',
-  posted_within_hours: 48,
+  posted_within_hours: 24,
   min_salary: '',
   max_salary: '',
   interval_hours: 24,

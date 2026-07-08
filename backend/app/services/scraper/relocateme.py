@@ -1,7 +1,6 @@
 """Relocate.me scraper — jobs explicitly offering relocation support."""
 
 import re
-from datetime import datetime
 from typing import Optional
 
 import httpx
@@ -61,7 +60,9 @@ class RelocateMeScraper:
                         url=url,
                         description=description,
                         location=location,
-                        posted_at=datetime.utcnow(),
+                        # The search cards carry no reliable posting date; a
+                        # faked utcnow() exempted these jobs from age filters.
+                        posted_at=None,
                         tags=["relocation"],
                     )
                 )

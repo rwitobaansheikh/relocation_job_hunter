@@ -20,7 +20,7 @@ export default function Jobs() {
 
   const [seniority, setSeniority] = useState([])
   const [workTypes, setWorkTypes] = useState([])
-  const [postedWithin, setPostedWithin] = useState(48)
+  const [postedWithin, setPostedWithin] = useState(24)
   const [minSalary, setMinSalary] = useState('')
   const [maxSalary, setMaxSalary] = useState('')
   const [locations, setLocations] = useState('')

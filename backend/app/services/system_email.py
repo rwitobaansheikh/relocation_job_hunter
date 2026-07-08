@@ -1,5 +1,7 @@
 """Send transactional emails from the app's mailbox (email@jobapplicationflow.com)."""
 
+import base64
+import html as html_lib
 import logging
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
@@ -7,10 +9,13 @@ from email.mime.text import MIMEText
 from pathlib import Path
 
 import aiosmtplib
+import httpx
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+_RESEND_URL = "https://api.resend.com/emails"
 
 
 def system_from_header() -> str:
@@ -26,6 +31,28 @@ def _smtp_configured() -> bool:
     return bool(settings.smtp_user and settings.smtp_password)
 
 
+def _branded_html(body_html: str | None, body_text: str) -> str:
+    """Wrap email content with the Job Application Flow logo header.
+
+    Text-only emails are converted to simple HTML so they get the logo too."""
+    logo_url = f"{settings.app_base_url.rstrip('/')}/logo-small.png"
+    if not body_html:
+        paragraphs = html_lib.escape(body_text).split("\n\n")
+        body_html = "".join(
+            f"<p>{p.replace(chr(10), '<br>')}</p>" for p in paragraphs if p.strip()
+        )
+    return (
+        '<div style="max-width:560px;margin:0 auto;font-family:Arial,Helvetica,sans-serif;'
+        'color:#26323c;">'
+        '<div style="padding:20px 0;text-align:center;">'
+        f'<img src="{logo_url}" alt="Job Application Flow" width="120" '
+        'style="max-width:120px;height:auto;border:0;">'
+        "</div>"
+        f'<div style="padding:0 8px 24px;font-size:15px;line-height:1.55;">{body_html}</div>'
+        "</div>"
+    )
+
+
 def _valid_attachment_paths(paths: list[str] | None) -> list[str]:
     valid: list[str] = []
     for file_path in paths or []:
@@ -37,6 +64,50 @@ def _valid_attachment_paths(paths: list[str] | None) -> list[str]:
     return valid
 
 
+async def _send_via_resend(
+    to: str,
+    subject: str,
+    body_text: str,
+    body_html: str | None,
+    attachments: list[str] | None,
+) -> tuple[bool, str | None]:
+    payload: dict = {
+        "from": system_from_header(),
+        "to": [to],
+        "subject": subject,
+        "text": body_text,
+        "html": _branded_html(body_html, body_text),
+    }
+    files = []
+    for file_path in _valid_attachment_paths(attachments):
+        path = Path(file_path)
+        files.append(
+            {
+                "filename": path.name,
+                "content": base64.b64encode(path.read_bytes()).decode("ascii"),
+            }
+        )
+    if files:
+        payload["attachments"] = files
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                _RESEND_URL,
+                json=payload,
+                headers={"Authorization": f"Bearer {settings.resend_api_key}"},
+            )
+        if resp.status_code in (200, 201):
+            return True, None
+        error = f"Resend API error {resp.status_code}: {resp.text[:300]}"
+        logger.error("System email failed to %s: %s", to, error)
+        return False, error
+    except Exception as exc:
+        error = str(exc).strip() or exc.__class__.__name__
+        logger.error("System email failed to %s: %s", to, error)
+        return False, error
+
+
 async def send_system_email(
     to: str,
     subject: str,
@@ -45,23 +116,22 @@ async def send_system_email(
     attachments: list[str] | None = None,
 ) -> tuple[bool, str | None]:
     """Deliver an app email to a user. Returns (success, error_message)."""
+    if not to:
+        return False, "No recipient email address."
+
+    if settings.resend_api_key:
+        return await _send_via_resend(to, subject, body_text, body_html, attachments)
+
     if not _smtp_configured():
         msg = "App mail is not configured (SMTP_USER / SMTP_PASSWORD missing on the server)."
         logger.warning("System email skipped: %s subject=%s", msg, subject)
         return False, msg
 
-    if not to:
-        return False, "No recipient email address."
-
-    if body_html:
-        msg = MIMEMultipart("mixed")
-        alt = MIMEMultipart("alternative")
-        alt.attach(MIMEText(body_text, "plain", "utf-8"))
-        alt.attach(MIMEText(body_html, "html", "utf-8"))
-        msg.attach(alt)
-    else:
-        msg = MIMEMultipart()
-        msg.attach(MIMEText(body_text, "plain", "utf-8"))
+    msg = MIMEMultipart("mixed")
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(body_text, "plain", "utf-8"))
+    alt.attach(MIMEText(_branded_html(body_html, body_text), "html", "utf-8"))
+    msg.attach(alt)
 
     msg["Subject"] = subject
     msg["From"] = system_from_header()

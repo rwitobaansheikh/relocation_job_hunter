@@ -17,7 +17,8 @@ class LoginRequest(BaseModel):
 
 class DeleteAccountRequest(BaseModel):
     # Password re-confirmation guards against accidental/hijacked deletion.
-    password: str
+    # OAuth accounts have no usable password and confirm with "DELETE" instead.
+    password: str = ""
     confirm: str = ""  # client sends "DELETE" to acknowledge permanence
 
 
@@ -235,7 +236,7 @@ class AutomationLoopCreate(BaseModel):
     role: str = Field(default="", max_length=200)
     locations: str = ""
     seniority_levels: str = ""
-    posted_within_hours: int = Field(default=48, ge=1, le=2160)
+    posted_within_hours: int = Field(default=24, ge=1, le=2160)
     min_salary: Optional[int] = Field(default=None, ge=0)
     max_salary: Optional[int] = Field(default=None, ge=0)
     interval_hours: int = Field(default=24, ge=1, le=168)
@@ -479,7 +480,7 @@ WORK_TYPES = ("remote", "hybrid", "onsite")
 class JobSearchRequest(BaseModel):
     max_jobs: int = Field(default=100)
     seniority_levels: list[str] = Field(default_factory=list)
-    posted_within_hours: int = Field(default=48, ge=1, le=2160)
+    posted_within_hours: int = Field(default=24, ge=1, le=2160)
     min_salary: Optional[int] = Field(default=None, ge=0)
     max_salary: Optional[int] = Field(default=None, ge=0)
     # The UI now sends one location at a time to strictly enforce location scoping.

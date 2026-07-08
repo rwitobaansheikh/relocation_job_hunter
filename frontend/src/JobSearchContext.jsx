@@ -71,7 +71,7 @@ export function JobSearchProvider({ children }) {
         const payload = {
           max_jobs: 100,
           seniority_levels: filters.seniority || [],
-          posted_within_hours: Number(filters.postedWithin ?? 48),
+          posted_within_hours: Number(filters.postedWithin ?? 24),
           location: loc,
           work_types: filters.workTypes || [],
         }

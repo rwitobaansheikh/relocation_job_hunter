@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # App → user mail (trial reminders, test previews, billing notices).
     system_email_from: str = "email@jobapplicationflow.com"
     system_email_name: str = "Job Application Flow"
+    # Resend API key for system emails. When set, system emails are delivered
+    # via the Resend HTTP API (from system_email_from) instead of SMTP.
+    resend_api_key: str = ""
     database_url: str = "sqlite:///./job_hunter.db"
     max_jobs_per_search: int = 100
     max_emails_per_company: int = 6
@@ -37,7 +40,17 @@ class Settings(BaseSettings):
     smtp_verify_mail_from: str = "verify@jobapplicationflow.com"
     smtp_verify_delay_ms: int = 1500
     smtp_verify_timeout_ms: int = 10000
-    job_age_hours: int = 48
+    job_age_hours: int = 24
+    # --- Extra job sources ---
+    # Greenhouse boards to poll (company slugs from boards.greenhouse.io/<slug>).
+    greenhouse_boards: str = (
+        "gitlab,stripe,cloudflare,datadog,elastic,hashicorp,mongodb,twilio,"
+        "figma,airbnb,personio,celonis,klarna,adyen,wise,deliveryhero,gohighlevel"
+    )
+    # Reed.co.uk jobseeker API key (free at reed.co.uk/developers); empty disables.
+    reed_api_key: str = ""
+    # SerpAPI key for the Google Jobs engine (serpapi.com); empty disables.
+    serpapi_api_key: str = ""
     uploads_dir: str = "uploads"
     generated_dir: str = "generated"
     static_dir: str = "static"

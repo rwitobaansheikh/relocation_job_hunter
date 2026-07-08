@@ -22,7 +22,11 @@ from app.services.scraper.linkedin_query import (
     resolve_work_type_codes,
     split_locations,
 )
+from app.services.scraper.google_jobs import GoogleJobsScraper
+from app.services.scraper.greenhouse import GreenhouseScraper
+from app.services.scraper.jobicy import JobicyScraper
 from app.services.scraper.linkedin import LinkedInScraper, compute_fetch_limit
+from app.services.scraper.reed import ReedScraper
 from app.services.scraper.relocateme import RelocateMeScraper
 from app.services.scraper.remotive import RemotiveScraper
 from app.services.scraper.remoteok import RemoteOKScraper
@@ -74,6 +78,10 @@ class JobSearchService:
             RemotiveScraper(),
             WeWorkRemotelyScraper(),
             RelocateMeScraper(),
+            GreenhouseScraper(),
+            JobicyScraper(),
+            ReedScraper(),  # no-op unless REED_API_KEY is set
+            GoogleJobsScraper(),  # no-op unless SERPAPI_API_KEY is set
         ]
         self.matcher = JobMatcher()
 
@@ -200,7 +208,7 @@ class JobSearchService:
 
         yield {
             "type": "progress",
-            "message": "Searching RemoteOK, Remotive, WeWorkRemotely, and Relocate.me…",
+            "message": "Searching RemoteOK, Remotive, WeWorkRemotely, Relocate.me, Greenhouse, Jobicy, Reed, and Google Jobs…",
             "location": linkedin_geo[0],
             "roles": roles,
             "stats": stats,
