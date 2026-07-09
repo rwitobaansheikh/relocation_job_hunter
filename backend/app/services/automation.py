@@ -21,6 +21,7 @@ from app.database import (
     User,
     UserProfile,
 )
+from app.services.automation_notifications import notify_run_complete
 from app.services.document_generator import DocumentGenerator
 from app.services.job_search import JobSearchService, SearchFilters
 from app.services.plans import effective_limits
@@ -135,6 +136,10 @@ class AutomationService:
             loop.last_run_at = run.finished_at
             db.commit()
             db.refresh(run)
+
+        if run.status == "success":
+            # Daily digest to the loop owner; failures are logged, never raised.
+            await notify_run_complete(db, loop, run, batch_date)
         return run
 
 
